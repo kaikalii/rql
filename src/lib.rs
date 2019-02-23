@@ -402,6 +402,19 @@ impl<'a, T> Clone for RowIter<'a, T> {
     }
 }
 
+/// An mutable iterator over rows in a `Table`
+#[derive(Debug)]
+pub struct RowIterMut<'a, T> {
+    inner: hash_map::IterMut<'a, Id<T>, T>,
+}
+
+impl<'a, T> Iterator for RowIterMut<'a, T> {
+    type Item = RowMut<'a, T>;
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner.next().map(|(id, data)| RowMut { id: *id, data })
+    }
+}
+
 /**
 A table abstraction akin to a table in a real database
 */
@@ -433,6 +446,12 @@ impl<T> Table<T> {
     pub fn rows(&self) -> RowIter<T> {
         RowIter {
             inner: self.map.iter(),
+        }
+    }
+    /// Iterate mutably over all rows in the `Table`
+    pub fn rows_mut(&mut self) -> RowIterMut<T> {
+        RowIterMut {
+            inner: self.map.iter_mut(),
         }
     }
 }
@@ -497,7 +516,45 @@ where
 impl<'a, T> HasRows<'a> for &'a Table<T> {
     type Iter = RowIter<'a, T>;
     fn rows(self) -> Self::Iter {
-        self.rows()
+        Table::rows(self)
+    }
+}
+
+impl<'a, T> HasRows<'a> for &'a mut Table<T> {
+    type Iter = RowIter<'a, T>;
+    fn rows(self) -> Self::Iter {
+        Table::rows(self)
+    }
+}
+
+/**
+A trait for things that have mutable rows
+*/
+pub trait HasRowsMut<'a>: Sized {
+    /// The row iterator type
+    type Iter: Iterator;
+    /// Get the row iterator
+    fn rows_mut(self) -> Self::Iter;
+    /// Update the rows
+    fn update(self) -> Self::Iter {
+        self.rows_mut()
+    }
+}
+
+impl<'a, I> HasRowsMut<'a> for I
+where
+    I: Iterator,
+{
+    type Iter = I;
+    fn rows_mut(self) -> Self::Iter {
+        self
+    }
+}
+
+impl<'a, T> HasRowsMut<'a> for &'a mut Table<T> {
+    type Iter = RowIterMut<'a, T>;
+    fn rows_mut(self) -> Self::Iter {
+        Table::rows_mut(self)
     }
 }
 
@@ -507,13 +564,6 @@ An adaptor for selecting data
 pub struct Select<I, F> {
     iter: I,
     selector: F,
-}
-
-impl<I, F, R> Select<I, F>
-where
-    I: Iterator,
-    F: Fn(I::Item) -> R,
-{
 }
 
 impl<I, F, R> Iterator for Select<I, F>
@@ -652,7 +702,7 @@ macro_rules! database {
 }
 
 /// Test module
-#[cfg(test)]
+// #[cfg(test)]
 mod tests {
     /// Reexport everything from `rql` so macros work
     /// as if this is a foreign library
@@ -660,7 +710,7 @@ mod tests {
         pub use super::super::*;
     }
     use super::*;
-    #[test]
+    // #[test]
     fn compiles() {
         database! {
             Db {
@@ -688,6 +738,9 @@ mod tests {
             .relate(&db.nums, |a, b| a == b)
         {
             println!("{:?}", s);
+        }
+        for mut s in db.strings.update() {
+            *s = "wow".into()
         }
     }
 }
