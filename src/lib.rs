@@ -8,7 +8,10 @@ However, bear in mind that there is no traditional database here, just some trai
 and adapters applied to iterators and hashmaps
 */
 
-use std::{fmt, ops::Deref};
+use std::{
+    fmt,
+    ops::{Deref, DerefMut},
+};
 
 use hashbrown::{hash_map, HashMap};
 use serde_derive::{Deserialize, Serialize};
@@ -16,11 +19,12 @@ use uuid::Uuid;
 
 /// A prelude for commonly used imports
 pub mod prelude {
-    pub use crate::{Id, Relatable, Selectable, Table};
+    pub use crate::{database, HasRows, Id, Table};
 }
 
 /// An id for indexing rows
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
 pub struct Id(Uuid);
 
 impl Id {
@@ -49,20 +53,61 @@ impl Default for Id {
 }
 
 /// A row in a `Table`
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Row<T> {
+pub struct Row<'a, T> {
     id: Id,
-    data: T,
+    data: &'a T,
 }
 
-impl<'a, T> Deref for Row<&'a T> {
+impl<'a, T> Row<'a, T> {
+    /// Change the data held in a row without changing its id
+    pub fn map<F, U>(&self, f: F) -> MappedRow<U>
+    where
+        F: Fn(&T) -> U,
+    {
+        MappedRow {
+            id: self.id,
+            data: f(self.data),
+        }
+    }
+}
+
+impl<'a, T> Clone for Row<'a, T> {
+    fn clone(&self) -> Self {
+        Row {
+            id: self.id,
+            data: self.data,
+        }
+    }
+}
+
+impl<'a, T> Copy for Row<'a, T> {}
+
+impl<'a, T, U> PartialEq<Row<'a, U>> for Row<'a, T>
+where
+    T: PartialEq<U>,
+{
+    fn eq(&self, other: &Row<U>) -> bool {
+        self.data.eq(&other.data)
+    }
+}
+
+impl<'a, T, U> PartialEq<MappedRow<U>> for Row<'a, T>
+where
+    T: PartialEq<U>,
+{
+    fn eq(&self, other: &MappedRow<U>) -> bool {
+        self.data.eq(&other.data)
+    }
+}
+
+impl<'a, T> Deref for Row<'a, T> {
     type Target = T;
     fn deref(&self) -> &Self::Target {
         self.data
     }
 }
 
-impl<T> fmt::Debug for Row<T>
+impl<'a, T> fmt::Debug for Row<'a, T>
 where
     T: fmt::Debug,
 {
@@ -75,7 +120,80 @@ where
     }
 }
 
-impl<T> fmt::Display for Row<T>
+impl<'a, T> fmt::Display for Row<'a, T>
+where
+    T: fmt::Display,
+{
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        <T as fmt::Display>::fmt(&self.data, f)
+    }
+}
+
+/// A row that was mapped from another and owns its data
+#[derive(Clone, Copy)]
+pub struct MappedRow<T> {
+    id: Id,
+    data: T,
+}
+
+impl<T> MappedRow<T> {
+    /// Change the data held in a row without changing its id
+    pub fn map<F, U>(self, f: F) -> MappedRow<U>
+    where
+        F: Fn(T) -> U,
+    {
+        MappedRow {
+            id: self.id,
+            data: f(self.data),
+        }
+    }
+}
+
+impl<T, U> PartialEq<MappedRow<U>> for MappedRow<T>
+where
+    T: PartialEq<U>,
+{
+    fn eq(&self, other: &MappedRow<U>) -> bool {
+        self.data.eq(&other.data)
+    }
+}
+
+impl<'a, T, U> PartialEq<Row<'a, U>> for MappedRow<T>
+where
+    T: PartialEq<U>,
+{
+    fn eq(&self, other: &Row<U>) -> bool {
+        self.data.eq(&other.data)
+    }
+}
+
+impl<T> Deref for MappedRow<T> {
+    type Target = T;
+    fn deref(&self) -> &Self::Target {
+        &self.data
+    }
+}
+
+impl<T> DerefMut for MappedRow<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.data
+    }
+}
+
+impl<T> fmt::Debug for MappedRow<T>
+where
+    T: fmt::Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        if f.alternate() {
+            write!(f, "{}: {:#?}", self.id, self.data)
+        } else {
+            write!(f, "{}: {:?}", self.id, self.data)
+        }
+    }
+}
+
+impl<T> fmt::Display for MappedRow<T>
 where
     T: fmt::Display,
 {
@@ -91,7 +209,7 @@ pub struct RowIter<'a, T> {
 }
 
 impl<'a, T> Iterator for RowIter<'a, T> {
-    type Item = Row<&'a T>;
+    type Item = Row<'a, T>;
     fn next(&mut self) -> Option<Self::Item> {
         self.inner.next().map(|(id, data)| Row { id: *id, data })
     }
@@ -100,7 +218,7 @@ impl<'a, T> Iterator for RowIter<'a, T> {
 /**
 A table abstraction akin to a table in a real database
 */
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub struct Table<T> {
     map: HashMap<Id, T>,
 }
@@ -124,6 +242,14 @@ impl<T> Table<T> {
     }
 }
 
+impl<T> Default for Table<T> {
+    fn default() -> Self {
+        Table {
+            map: Default::default(),
+        }
+    }
+}
+
 impl<T> fmt::Debug for Table<T>
 where
     T: fmt::Debug,
@@ -136,11 +262,42 @@ where
 /**
 A trait for things that have rows
 */
-pub trait HasRows<'a> {
+pub trait HasRows<'a>: Sized {
     /// The row iterator type
     type Iter: Iterator;
     /// Get the row iterator
     fn rows(self) -> Self::Iter;
+    /// Create a selection
+    fn select<F, R>(self, f: F) -> Select<Self::Iter, F>
+    where
+        F: Fn(<<Self as HasRows<'a>>::Iter as Iterator>::Item) -> R,
+    {
+        Select {
+            iter: self.rows(),
+            selector: f,
+        }
+    }
+    /// Relate this `HasRows` to another
+    fn relate<R, F>(self, other: R, f: F) -> Relate<Self::Iter, R::Iter, F>
+    where
+        R: HasRows<'a>,
+        R::Iter: Clone,
+        <R::Iter as Iterator>::Item: Copy,
+        <Self::Iter as Iterator>::Item: Copy,
+        F: Fn(<Self::Iter as Iterator>::Item, <R::Iter as Iterator>::Item) -> bool,
+    {
+        Relate::new(self.rows(), other.rows(), f)
+    }
+}
+
+impl<'a, I> HasRows<'a> for I
+where
+    I: Iterator,
+{
+    type Iter = I;
+    fn rows(self) -> Self::Iter {
+        self
+    }
 }
 
 impl<'a, T> HasRows<'a> for &'a Table<T>
@@ -154,7 +311,7 @@ where
 }
 
 /**
-An adaptor for selecting data from a `Table`
+An adaptor for selecting data
 */
 pub struct Select<I, F> {
     iter: I,
@@ -180,25 +337,7 @@ where
 }
 
 /**
-A trait for things that can be selected from
-*/
-pub trait Selectable<'a>: HasRows<'a> + Sized {
-    /// Create the `Select`
-    fn select<F, R>(self, f: F) -> Select<Self::Iter, F>
-    where
-        F: Fn(<<Self as HasRows<'a>>::Iter as Iterator>::Item) -> R,
-    {
-        Select {
-            iter: self.rows(),
-            selector: f,
-        }
-    }
-}
-
-impl<'a, R> Selectable<'a> for R where R: HasRows<'a> {}
-
-/**
-A relationship between two tables
+A relationship between two things
 */
 pub struct Relate<A, B, F>
 where
@@ -262,42 +401,43 @@ where
     }
 }
 
-impl<'a, A, B, F> HasRows<'a> for Relate<A, B, F>
-where
-    A: Iterator + 'a,
-    B: Iterator + Clone + 'a,
-    A::Item: Copy,
-    B::Item: Copy,
-    F: Fn(A::Item, B::Item) -> bool + 'a,
-{
-    type Iter = Relate<A, B, F>;
-    fn rows(self) -> Self::Iter {
-        self
-    }
-}
-
 /**
-A trait for things that can be related
-*/
-pub trait Relatable<'a>: HasRows<'a> + Sized {
-    /// Relate this `Relatable` to another
-    fn relate<R, F>(self, other: R, f: F) -> Relate<Self::Iter, R::Iter, F>
-    where
-        R: Relatable<'a>,
-        R::Iter: Clone,
-        <<R as HasRows<'a>>::Iter as Iterator>::Item: Copy,
-        <<Self as HasRows<'a>>::Iter as Iterator>::Item: Copy,
-        F: Fn(
-            <<Self as HasRows<'a>>::Iter as Iterator>::Item,
-            <<R as HasRows<'a>>::Iter as Iterator>::Item,
-        ) -> bool,
-    {
-        Relate::new(self.rows(), other.rows(), f)
+Macro for generating a database `struct`
+
+`database!` generates the structure itself as well as necessary
+function impls.
+
+# Example
+```
+use rql::prelude::*;
+
+struct Person {
+    name: String,
+    age: usize,
+}
+
+struct Account {
+    owner: Id,
+    balance: f32,
+}
+
+// The database type generated by
+
+database! {
+    DatabaseA {
+        person: Person,
+        account: Account,
     }
 }
 
-impl<'a, R> Relatable<'a> for R where R: HasRows<'a> {}
+// is structurally equivalent to
 
+struct DatabaseB {
+    pub person: Table<Person>,
+    pub account: Table<Account>,
+}
+```
+*/
 #[macro_export]
 macro_rules! database {
     ($name:ident { $($table:ident: $type:ty),* $(,)? }) => {
@@ -333,7 +473,7 @@ mod tests {
     }
     use super::*;
     #[test]
-    fn _it_works() {
+    fn compiles() {
         database! {
             Db {
                 nums: usize,
@@ -353,6 +493,13 @@ mod tests {
             .select(|(i, s)| format!("{}: {}", s, i))
         {
             println!("{}", s);
+        }
+        for s in db
+            .strings
+            .select(|row| row.map(|s| s.len()))
+            .relate(&db.nums, |a, b| a == b)
+        {
+            println!("{:?}", s);
         }
     }
 }
