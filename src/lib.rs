@@ -10,6 +10,8 @@ and adapters applied to iterators and hashmaps
 
 use std::{
     fmt,
+    hash::{Hash, Hasher},
+    marker::PhantomData,
     ops::{Deref, DerefMut},
 };
 
@@ -23,30 +25,61 @@ pub mod prelude {
 }
 
 /// An id for indexing rows
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(transparent)]
-pub struct Id(Uuid);
+pub struct Id<T> {
+    uuid: Uuid,
+    pd: PhantomData<T>,
+}
 
-impl Id {
+impl<T> Id<T> {
     /// Create a new `Id`
     pub fn new() -> Self {
-        Id(Uuid::new_v4())
+        Id {
+            uuid: Uuid::new_v4(),
+            pd: PhantomData,
+        }
     }
 }
 
-impl fmt::Debug for Id {
+impl<T> Clone for Id<T> {
+    fn clone(&self) -> Self {
+        Id {
+            uuid: self.uuid,
+            pd: PhantomData,
+        }
+    }
+}
+
+impl<T> Copy for Id<T> {}
+
+impl<T> PartialEq for Id<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.uuid.eq(&other.uuid)
+    }
+}
+
+impl<T> Eq for Id<T> {}
+
+impl<T> Hash for Id<T> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.uuid.hash(state);
+    }
+}
+
+impl<T> fmt::Debug for Id<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.0.to_simple())
+        write!(f, "{}", self.uuid.to_simple())
     }
 }
 
-impl fmt::Display for Id {
+impl<T> fmt::Display for Id<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.0.to_simple())
+        write!(f, "{}", self.uuid.to_simple())
     }
 }
 
-impl Default for Id {
+impl<T> Default for Id<T> {
     fn default() -> Self {
         Self::new()
     }
@@ -54,13 +87,13 @@ impl Default for Id {
 
 /// A row in a `Table`
 pub struct Row<'a, T> {
-    id: Id,
+    id: Id<T>,
     data: &'a T,
 }
 
 impl<'a, T> Row<'a, T> {
     /// Change the data held in a row without changing its id
-    pub fn map<F, U>(&self, f: F) -> MappedRow<U>
+    pub fn map<F, U>(&self, f: F) -> MappedRow<T, U>
     where
         F: Fn(&T) -> U,
     {
@@ -91,11 +124,22 @@ where
     }
 }
 
-impl<'a, T, U> PartialEq<MappedRow<U>> for Row<'a, T>
+impl<'a, T> Eq for Row<'a, T> where T: Eq {}
+
+impl<'a, T, U> PartialEq<RowMut<'a, U>> for Row<'a, T>
 where
     T: PartialEq<U>,
 {
-    fn eq(&self, other: &MappedRow<U>) -> bool {
+    fn eq(&self, other: &RowMut<U>) -> bool {
+        self.data.eq(other.data)
+    }
+}
+
+impl<'a, T, U, V> PartialEq<MappedRow<V, U>> for Row<'a, T>
+where
+    T: PartialEq<U>,
+{
+    fn eq(&self, other: &MappedRow<V, U>) -> bool {
         self.data.eq(&other.data)
     }
 }
@@ -103,6 +147,12 @@ where
 impl<'a, T> Deref for Row<'a, T> {
     type Target = T;
     fn deref(&self) -> &Self::Target {
+        self.data
+    }
+}
+
+impl<'a, T> AsRef<T> for Row<'a, T> {
+    fn as_ref(&self) -> &T {
         self.data
     }
 }
@@ -129,18 +179,17 @@ where
     }
 }
 
-/// A row that was mapped from another and owns its data
-#[derive(Clone, Copy)]
-pub struct MappedRow<T> {
-    id: Id,
-    data: T,
+/// A mutable row in a `Table`
+pub struct RowMut<'a, T> {
+    id: Id<T>,
+    data: &'a mut T,
 }
 
-impl<T> MappedRow<T> {
+impl<'a, T> RowMut<'a, T> {
     /// Change the data held in a row without changing its id
-    pub fn map<F, U>(self, f: F) -> MappedRow<U>
+    pub fn map<F, U>(&self, f: F) -> MappedRow<T, U>
     where
-        F: Fn(T) -> U,
+        F: Fn(&T) -> U,
     {
         MappedRow {
             id: self.id,
@@ -149,38 +198,61 @@ impl<T> MappedRow<T> {
     }
 }
 
-impl<T, U> PartialEq<MappedRow<U>> for MappedRow<T>
+impl<'a, T, U> PartialEq<RowMut<'a, U>> for RowMut<'a, T>
 where
     T: PartialEq<U>,
 {
-    fn eq(&self, other: &MappedRow<U>) -> bool {
+    fn eq(&self, other: &RowMut<U>) -> bool {
         self.data.eq(&other.data)
     }
 }
 
-impl<'a, T, U> PartialEq<Row<'a, U>> for MappedRow<T>
+impl<'a, T> Eq for RowMut<'a, T> where T: Eq {}
+
+impl<'a, T, U> PartialEq<Row<'a, U>> for RowMut<'a, T>
 where
     T: PartialEq<U>,
 {
     fn eq(&self, other: &Row<U>) -> bool {
-        self.data.eq(&other.data)
+        (self.data as &T).eq(other.data)
     }
 }
 
-impl<T> Deref for MappedRow<T> {
+impl<'a, T, U, V> PartialEq<MappedRow<V, U>> for RowMut<'a, T>
+where
+    T: PartialEq<U>,
+{
+    fn eq(&self, other: &MappedRow<V, U>) -> bool {
+        (self.data as &T).eq(&other.data)
+    }
+}
+
+impl<'a, T> Deref for RowMut<'a, T> {
     type Target = T;
     fn deref(&self) -> &Self::Target {
-        &self.data
+        self.data
     }
 }
 
-impl<T> DerefMut for MappedRow<T> {
+impl<'a, T> DerefMut for RowMut<'a, T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.data
+        self.data
     }
 }
 
-impl<T> fmt::Debug for MappedRow<T>
+impl<'a, T> AsRef<T> for RowMut<'a, T> {
+    fn as_ref(&self) -> &T {
+        self.data
+    }
+}
+
+impl<'a, T> AsMut<T> for RowMut<'a, T> {
+    fn as_mut(&mut self) -> &mut T {
+        self.data
+    }
+}
+
+impl<'a, T> fmt::Debug for RowMut<'a, T>
 where
     T: fmt::Debug,
 {
@@ -193,7 +265,114 @@ where
     }
 }
 
-impl<T> fmt::Display for MappedRow<T>
+impl<'a, T> fmt::Display for RowMut<'a, T>
+where
+    T: fmt::Display,
+{
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        <T as fmt::Display>::fmt(&self.data, f)
+    }
+}
+
+/// A row that was mapped from another and owns its data
+pub struct MappedRow<I, T> {
+    id: Id<I>,
+    data: T,
+}
+
+impl<I, T> MappedRow<I, T> {
+    /// Change the data held in a row without changing its id
+    pub fn map<F, U>(self, f: F) -> MappedRow<I, U>
+    where
+        F: Fn(T) -> U,
+    {
+        MappedRow {
+            id: self.id,
+            data: f(self.data),
+        }
+    }
+}
+
+impl<I, T> Clone for MappedRow<I, T>
+where
+    T: Clone,
+{
+    fn clone(&self) -> Self {
+        MappedRow {
+            id: self.id,
+            data: self.data.clone(),
+        }
+    }
+}
+
+impl<I, T> Copy for MappedRow<I, T> where T: Copy {}
+
+impl<I, T, U> PartialEq<MappedRow<I, U>> for MappedRow<I, T>
+where
+    T: PartialEq<U>,
+{
+    fn eq(&self, other: &MappedRow<I, U>) -> bool {
+        self.data.eq(&other.data)
+    }
+}
+
+impl<'a, T, U, V> PartialEq<Row<'a, U>> for MappedRow<V, T>
+where
+    T: PartialEq<U>,
+{
+    fn eq(&self, other: &Row<U>) -> bool {
+        self.data.eq(other.data)
+    }
+}
+
+impl<'a, T, U, V> PartialEq<RowMut<'a, U>> for MappedRow<V, T>
+where
+    T: PartialEq<U>,
+{
+    fn eq(&self, other: &RowMut<U>) -> bool {
+        self.data.eq(other.data)
+    }
+}
+
+impl<I, T> Deref for MappedRow<I, T> {
+    type Target = T;
+    fn deref(&self) -> &Self::Target {
+        &self.data
+    }
+}
+
+impl<I, T> AsRef<T> for MappedRow<I, T> {
+    fn as_ref(&self) -> &T {
+        &self.data
+    }
+}
+
+impl<I, T> AsMut<T> for MappedRow<I, T> {
+    fn as_mut(&mut self) -> &mut T {
+        &mut self.data
+    }
+}
+
+impl<I, T> DerefMut for MappedRow<I, T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.data
+    }
+}
+
+impl<I, T> fmt::Debug for MappedRow<I, T>
+where
+    T: fmt::Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        if f.alternate() {
+            write!(f, "{}: {:#?}", self.id, self.data)
+        } else {
+            write!(f, "{}: {:?}", self.id, self.data)
+        }
+    }
+}
+
+impl<I, T> fmt::Display for MappedRow<I, T>
 where
     T: fmt::Display,
 {
@@ -203,9 +382,9 @@ where
 }
 
 /// An iterator over rows in a `Table`
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct RowIter<'a, T> {
-    inner: hash_map::Iter<'a, Id, T>,
+    inner: hash_map::Iter<'a, Id<T>, T>,
 }
 
 impl<'a, T> Iterator for RowIter<'a, T> {
@@ -215,12 +394,20 @@ impl<'a, T> Iterator for RowIter<'a, T> {
     }
 }
 
+impl<'a, T> Clone for RowIter<'a, T> {
+    fn clone(&self) -> Self {
+        RowIter {
+            inner: self.inner.clone(),
+        }
+    }
+}
+
 /**
 A table abstraction akin to a table in a real database
 */
 #[derive(Serialize, Deserialize)]
 pub struct Table<T> {
-    map: HashMap<Id, T>,
+    map: HashMap<Id<T>, T>,
 }
 
 impl<T> Table<T> {
@@ -233,6 +420,14 @@ impl<T> Table<T> {
     /// Insert a row into the `Table`
     pub fn insert(&mut self, row: T) {
         self.map.insert(Id::new(), row);
+    }
+    /// Try to get a reference to the row with the given `Id`
+    pub fn get(&self, id: Id<T>) -> Option<&T> {
+        self.map.get(&id)
+    }
+    /// Try to get a mutable reference to the row with the given `Id`
+    pub fn get_mut(&mut self, id: Id<T>) -> Option<&mut T> {
+        self.map.get_mut(&id)
     }
     /// Iterate over all rows in the `Table`
     pub fn rows(&self) -> RowIter<T> {
@@ -270,7 +465,7 @@ pub trait HasRows<'a>: Sized {
     /// Create a selection
     fn select<F, R>(self, f: F) -> Select<Self::Iter, F>
     where
-        F: Fn(<<Self as HasRows<'a>>::Iter as Iterator>::Item) -> R,
+        F: Fn(<Self::Iter as Iterator>::Item) -> R,
     {
         Select {
             iter: self.rows(),
@@ -282,9 +477,8 @@ pub trait HasRows<'a>: Sized {
     where
         R: HasRows<'a>,
         R::Iter: Clone,
-        <R::Iter as Iterator>::Item: Copy,
-        <Self::Iter as Iterator>::Item: Copy,
-        F: Fn(<Self::Iter as Iterator>::Item, <R::Iter as Iterator>::Item) -> bool,
+        <Self::Iter as Iterator>::Item: Clone,
+        F: Fn(&<Self::Iter as Iterator>::Item, &<R::Iter as Iterator>::Item) -> bool,
     {
         Relate::new(self.rows(), other.rows(), f)
     }
@@ -300,10 +494,7 @@ where
     }
 }
 
-impl<'a, T> HasRows<'a> for &'a Table<T>
-where
-    T: 'a,
-{
+impl<'a, T> HasRows<'a> for &'a Table<T> {
     type Iter = RowIter<'a, T>;
     fn rows(self) -> Self::Iter {
         self.rows()
@@ -343,8 +534,7 @@ pub struct Relate<A, B, F>
 where
     A: Iterator,
     B: Iterator + Clone,
-    A::Item: Copy,
-    B::Item: Copy,
+    A::Item: Clone,
 {
     iter_a: A,
     iter_b: B,
@@ -357,8 +547,7 @@ impl<A, B, F> Relate<A, B, F>
 where
     A: Iterator,
     B: Iterator + Clone,
-    A::Item: Copy,
-    B::Item: Copy,
+    A::Item: Clone,
 {
     fn new(mut iter_a: A, iter_b: B, f: F) -> Self {
         let curr_a = iter_a.next();
@@ -376,17 +565,16 @@ impl<A, B, F> Iterator for Relate<A, B, F>
 where
     A: Iterator,
     B: Iterator + Clone,
-    A::Item: Copy,
-    B::Item: Copy,
-    F: Fn(A::Item, B::Item) -> bool,
+    A::Item: Clone,
+    F: Fn(&A::Item, &B::Item) -> bool,
 {
     type Item = (A::Item, B::Item);
     fn next(&mut self) -> Option<Self::Item> {
         loop {
             if let Some(ref a) = self.curr_a {
                 if let Some(b) = self.curr_b.next() {
-                    if (self.relation)(*a, b) {
-                        return Some((*a, b));
+                    if (self.relation)(a, &b) {
+                        return Some((a.clone(), b));
                     }
                 } else if let Some(next_a) = self.iter_a.next() {
                     self.curr_a = Some(next_a);
@@ -417,7 +605,7 @@ struct Person {
 }
 
 struct Account {
-    owner: Id,
+    owner: Id<Person>,
     balance: f32,
 }
 
@@ -489,10 +677,10 @@ mod tests {
         db.strings.insert("world".into());
         for s in db
             .nums
-            .relate(&db.strings, |i, s| s.len() == *i)
+            .relate(&db.strings, |i, s| s.len() == **i)
             .select(|(i, s)| format!("{}: {}", s, i))
         {
-            println!("{}", s);
+            println!("{:?}", s);
         }
         for s in db
             .strings
