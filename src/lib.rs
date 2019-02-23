@@ -1,6 +1,11 @@
 #![deny(missing_docs)]
 
 /*!
+# Description
+
+RQL (Rusty Query Language) is a library design to bring sql-like logic to Rust.
+However, bear in mind that there is no traditional database here, just some traits
+and adapters applied to iterators and hashmaps
 */
 
 use std::{fmt, ops::Deref};
@@ -11,9 +16,7 @@ use uuid::Uuid;
 
 /// A prelude for commonly used imports
 pub mod prelude {
-    pub use crate::Id;
-    pub use crate::Selectable;
-    pub use crate::Table;
+    pub use crate::{Id, Relatable, Selectable, Table};
 }
 
 /// An id for indexing rows
@@ -46,26 +49,49 @@ impl Default for Id {
 }
 
 /// A row in a `Table`
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Row<'a, T> {
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Row<T> {
     id: Id,
-    data: &'a T,
+    data: T,
 }
 
-impl<'a, T> Deref for Row<'a, T> {
+impl<'a, T> Deref for Row<&'a T> {
     type Target = T;
     fn deref(&self) -> &Self::Target {
         self.data
     }
 }
 
+impl<T> fmt::Debug for Row<T>
+where
+    T: fmt::Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        if f.alternate() {
+            write!(f, "{}: {:#?}", self.id, self.data)
+        } else {
+            write!(f, "{}: {:?}", self.id, self.data)
+        }
+    }
+}
+
+impl<T> fmt::Display for Row<T>
+where
+    T: fmt::Display,
+{
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        <T as fmt::Display>::fmt(&self.data, f)
+    }
+}
+
 /// An iterator over rows in a `Table`
+#[derive(Debug, Clone)]
 pub struct RowIter<'a, T> {
     inner: hash_map::Iter<'a, Id, T>,
 }
 
 impl<'a, T> Iterator for RowIter<'a, T> {
-    type Item = Row<'a, T>;
+    type Item = Row<&'a T>;
     fn next(&mut self) -> Option<Self::Item> {
         self.inner.next().map(|(id, data)| Row { id: *id, data })
     }
@@ -86,6 +112,10 @@ impl<T> Table<T> {
             map: HashMap::new(),
         }
     }
+    /// Insert a row into the `Table`
+    pub fn insert(&mut self, row: T) {
+        self.map.insert(Id::new(), row);
+    }
     /// Iterate over all rows in the `Table`
     pub fn rows(&self) -> RowIter<T> {
         RowIter {
@@ -104,24 +134,60 @@ where
 }
 
 /**
-Things that data can be selected from
+A trait for things that have rows
 */
-pub trait Selectable<F> {
-    /// The type of the `Select`
-    type Select;
-    /// The type of the `Data`
-    type Data;
-    /// Get the `Select`
-    fn select(&self, f: F) -> Self::Select;
+pub trait HasRows<'a> {
+    /// The row iterator type
+    type Iter: Iterator;
+    /// Get the row iterator
+    fn rows(self) -> Self::Iter;
 }
 
-impl<'a, T, F, R> Selectable<F> for &'a Table<T>
+impl<'a, T> HasRows<'a> for &'a Table<T>
 where
-    F: Fn(Row<T>) -> R,
+    T: 'a,
 {
-    type Select = Select<'a, T, RowIter<'a, T>, F, R>;
-    type Data = R;
-    fn select(&self, f: F) -> Self::Select {
+    type Iter = RowIter<'a, T>;
+    fn rows(self) -> Self::Iter {
+        self.rows()
+    }
+}
+
+/**
+An adaptor for selecting data from a `Table`
+*/
+pub struct Select<I, F> {
+    iter: I,
+    selector: F,
+}
+
+impl<I, F, R> Select<I, F>
+where
+    I: Iterator,
+    F: Fn(I::Item) -> R,
+{
+}
+
+impl<I, F, R> Iterator for Select<I, F>
+where
+    I: Iterator,
+    F: Fn(I::Item) -> R,
+{
+    type Item = R;
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iter.next().map(&self.selector)
+    }
+}
+
+/**
+A trait for things that can be selected from
+*/
+pub trait Selectable<'a>: HasRows<'a> + Sized {
+    /// Create the `Select`
+    fn select<F, R>(self, f: F) -> Select<Self::Iter, F>
+    where
+        F: Fn(<<Self as HasRows<'a>>::Iter as Iterator>::Item) -> R,
+    {
         Select {
             iter: self.rows(),
             selector: f,
@@ -129,36 +195,108 @@ where
     }
 }
 
+impl<'a, R> Selectable<'a> for R where R: HasRows<'a> {}
+
 /**
-A `SELECT` statment
+A relationship between two tables
 */
-pub struct Select<'a, T, I, F, R>
+pub struct Relate<A, B, F>
 where
-    T: 'a,
-    I: Iterator<Item = Row<'a, T>>,
-    F: Fn(Row<T>) -> R,
+    A: Iterator,
+    B: Iterator + Clone,
+    A::Item: Copy,
+    B::Item: Copy,
 {
-    iter: I,
-    selector: F,
+    iter_a: A,
+    iter_b: B,
+    curr_a: Option<A::Item>,
+    curr_b: B,
+    relation: F,
 }
 
-impl<'a, T, I, F, R> Select<'a, T, I, F, R>
+impl<A, B, F> Relate<A, B, F>
 where
-    I: Iterator<Item = Row<'a, T>>,
-    F: Fn(Row<T>) -> R,
+    A: Iterator,
+    B: Iterator + Clone,
+    A::Item: Copy,
+    B::Item: Copy,
 {
-}
-
-impl<'a, T, I, F, R> Iterator for Select<'a, T, I, F, R>
-where
-    I: Iterator<Item = Row<'a, T>>,
-    F: Fn(Row<T>) -> R,
-{
-    type Item = R;
-    fn next(&mut self) -> Option<Self::Item> {
-        self.iter.next().map(|row| (self.selector)(row))
+    fn new(mut iter_a: A, iter_b: B, f: F) -> Self {
+        let curr_a = iter_a.next();
+        Relate {
+            iter_a,
+            iter_b: iter_b.clone(),
+            curr_a,
+            curr_b: iter_b,
+            relation: f,
+        }
     }
 }
+
+impl<A, B, F> Iterator for Relate<A, B, F>
+where
+    A: Iterator,
+    B: Iterator + Clone,
+    A::Item: Copy,
+    B::Item: Copy,
+    F: Fn(A::Item, B::Item) -> bool,
+{
+    type Item = (A::Item, B::Item);
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            if let Some(ref a) = self.curr_a {
+                if let Some(b) = self.curr_b.next() {
+                    if (self.relation)(*a, b) {
+                        return Some((*a, b));
+                    }
+                } else if let Some(next_a) = self.iter_a.next() {
+                    self.curr_a = Some(next_a);
+                    self.curr_b = self.iter_b.clone();
+                } else {
+                    return None;
+                }
+            } else {
+                return None;
+            }
+        }
+    }
+}
+
+impl<'a, A, B, F> HasRows<'a> for Relate<A, B, F>
+where
+    A: Iterator + 'a,
+    B: Iterator + Clone + 'a,
+    A::Item: Copy,
+    B::Item: Copy,
+    F: Fn(A::Item, B::Item) -> bool + 'a,
+{
+    type Iter = Relate<A, B, F>;
+    fn rows(self) -> Self::Iter {
+        self
+    }
+}
+
+/**
+A trait for things that can be related
+*/
+pub trait Relatable<'a>: HasRows<'a> + Sized {
+    /// Relate this `Relatable` to another
+    fn relate<R, F>(self, other: R, f: F) -> Relate<Self::Iter, R::Iter, F>
+    where
+        R: Relatable<'a>,
+        R::Iter: Clone,
+        <<R as HasRows<'a>>::Iter as Iterator>::Item: Copy,
+        <<Self as HasRows<'a>>::Iter as Iterator>::Item: Copy,
+        F: Fn(
+            <<Self as HasRows<'a>>::Iter as Iterator>::Item,
+            <<R as HasRows<'a>>::Iter as Iterator>::Item,
+        ) -> bool,
+    {
+        Relate::new(self.rows(), other.rows(), f)
+    }
+}
+
+impl<'a, R> Relatable<'a> for R where R: HasRows<'a> {}
 
 #[macro_export]
 macro_rules! database {
@@ -186,7 +324,7 @@ macro_rules! database {
 }
 
 /// Test module
-// #[cfg(test)]
+#[cfg(test)]
 mod tests {
     /// Reexport everything from `rql` so macros work
     /// as if this is a foreign library
@@ -194,15 +332,27 @@ mod tests {
         pub use super::super::*;
     }
     use super::*;
-    // #[test]
-    fn it_works() {
+    #[test]
+    fn _it_works() {
         database! {
             Db {
-                nums: i64,
+                nums: usize,
                 strings: String,
             }
         }
-        let db = Db::new();
-        let select = db.nums.select(|x| 1);
+        let mut db = Db::new();
+        db.nums.insert(4);
+        db.nums.insert(2);
+        db.nums.insert(5);
+        db.strings.insert("hi".into());
+        db.strings.insert("hello".into());
+        db.strings.insert("world".into());
+        for s in db
+            .nums
+            .relate(&db.strings, |i, s| s.len() == *i)
+            .select(|(i, s)| format!("{}: {}", s, i))
+        {
+            println!("{}", s);
+        }
     }
 }
