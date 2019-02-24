@@ -23,7 +23,8 @@ use uuid::Uuid;
 
 /// A prelude for commonly used imports
 pub mod prelude {
-    pub use crate::{database, HasRows, Id, Table};
+    pub use crate::{database, HasRows, HasRowsMut, Id, Table};
+    pub use serde_derive::{Deserialize, Serialize};
 }
 
 /// An id for indexing rows
@@ -90,7 +91,8 @@ impl<T> Default for Id<T> {
 /**
 A table abstraction akin to a table in a real database
 */
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(transparent)]
 pub struct Table<T> {
     map: HashMap<Id<T>, T>,
 }
@@ -101,6 +103,14 @@ impl<T> Table<T> {
         Table {
             map: HashMap::new(),
         }
+    }
+    /// Get the number of rows in the `Table`
+    pub fn len(&self) -> usize {
+        self.map.len()
+    }
+    /// Check if the Table` is empty
+    pub fn is_empty(&self) -> bool {
+        self.map.is_empty()
     }
     /// Insert a row into the `Table`
     pub fn insert(&mut self, row: T) {
@@ -114,6 +124,10 @@ impl<T> Table<T> {
     pub fn get_mut(&mut self, id: Id<T>) -> Option<&mut T> {
         self.map.get_mut(&id)
     }
+    /// Remove the row with the given `Id`
+    pub fn remove(&mut self, id: Id<T>) -> Option<T> {
+        self.map.remove(&id)
+    }
     /// Iterate over all rows in the `Table`
     pub fn rows(&self) -> RowIter<T> {
         RowIter {
@@ -124,6 +138,31 @@ impl<T> Table<T> {
     pub fn rows_mut(&mut self) -> RowIterMut<T> {
         RowIterMut {
             inner: self.map.iter_mut(),
+        }
+    }
+    /// Delete a single row based on its `Id`
+    pub fn delete_one(&mut self, id: Id<T>) {
+        self.remove(id);
+    }
+    /// Delete rows that satisfy the clause
+    pub fn delete_where<F>(&mut self, f: F)
+    where
+        F: Fn(Row<T>) -> bool,
+    {
+        self.map.retain(|id, data| !f(Row { id: *id, data }))
+    }
+    /// Delete rows with ids returned by an iterator
+    pub fn delete_iter<'a, F, I, R>(&'a mut self, f: F)
+    where
+        F: Fn(&'a Self) -> I,
+        I: Iterator<Item = R>,
+        R: Idd<RowType = T>,
+    {
+        let ids: Vec<Id<T>> = f(unsafe { (self as *mut Self).as_mut() }.unwrap())
+            .map(|row| row.id())
+            .collect();
+        for id in ids {
+            self.remove(id);
         }
     }
 }
@@ -148,7 +187,7 @@ where
 /**
 A trait for accessing rows
 */
-pub trait HasRows<'a>: Sized {
+pub trait HasRows: Sized {
     /// The row iterator type
     type Iter: Iterator;
     /// Get the row iterator
@@ -166,19 +205,19 @@ pub trait HasRows<'a>: Sized {
     /// Relate this `HasRows` to another
     fn relate<R, F>(self, other: R, f: F) -> Relate<Self::Iter, R::Iter, F>
     where
-        R: HasRows<'a>,
+        R: HasRows,
         R::Iter: Clone,
         <Self::Iter as Iterator>::Item: Clone,
         F: Fn(&<Self::Iter as Iterator>::Item, &<R::Iter as Iterator>::Item) -> bool,
     {
         Relate::new(self.rows(), other.rows(), f)
     }
-    /// Restricts the rows
-    fn only<F>(self, f: F) -> Only<Self::Iter, F>
+    /// Restricts the rows with a `WHERE` clause
+    fn wher<F>(self, f: F) -> Where<Self::Iter, F>
     where
         F: Fn(&<Self::Iter as Iterator>::Item) -> bool,
     {
-        Only {
+        Where {
             iter: self.rows(),
             clause: f,
         }
@@ -188,11 +227,11 @@ pub trait HasRows<'a>: Sized {
     where
         F: Fn(&<Self::Iter as Iterator>::Item) -> bool,
     {
-        self.only(f).next()
+        self.wher(f).next()
     }
 }
 
-impl<'a, I> HasRows<'a> for I
+impl<'a, I> HasRows for I
 where
     I: Iterator,
 {
@@ -202,14 +241,14 @@ where
     }
 }
 
-impl<'a, T> HasRows<'a> for &'a Table<T> {
+impl<'a, T> HasRows for &'a Table<T> {
     type Iter = RowIter<'a, T>;
     fn rows(self) -> Self::Iter {
         Table::rows(self)
     }
 }
 
-impl<'a, T> HasRows<'a> for &'a mut Table<T> {
+impl<'a, T> HasRows for &'a mut Table<T> {
     type Iter = RowIter<'a, T>;
     fn rows(self) -> Self::Iter {
         Table::rows(self)
@@ -219,7 +258,7 @@ impl<'a, T> HasRows<'a> for &'a mut Table<T> {
 /**
 A trait for mutably accessing rows
 */
-pub trait HasRowsMut<'a>: Sized {
+pub trait HasRowsMut: Sized {
     /// The row iterator type
     type Iter: Iterator;
     /// Get the row iterator
@@ -230,7 +269,7 @@ pub trait HasRowsMut<'a>: Sized {
     }
 }
 
-impl<'a, I> HasRowsMut<'a> for I
+impl<'a, I> HasRowsMut for I
 where
     I: Iterator,
 {
@@ -240,7 +279,7 @@ where
     }
 }
 
-impl<'a, T> HasRowsMut<'a> for &'a mut Table<T> {
+impl<'a, T> HasRowsMut for &'a mut Table<T> {
     type Iter = RowIterMut<'a, T>;
     fn rows_mut(self) -> Self::Iter {
         Table::rows_mut(self)
@@ -332,12 +371,12 @@ where
 A clause for searching through rows and limiting
 the returned values, similar to a sql `WHERE`
 */
-pub struct Only<I, F> {
+pub struct Where<I, F> {
     iter: I,
     clause: F,
 }
 
-impl<I, F> Iterator for Only<I, F>
+impl<I, F> Iterator for Where<I, F>
 where
     I: Iterator,
     F: Fn(&I::Item) -> bool,
@@ -366,11 +405,13 @@ function impls.
 ```
 use rql::prelude::*;
 
+#[derive(Serialize, Deserialize)]
 struct Person {
     name: String,
     age: usize,
 }
 
+#[derive(Serialize, Deserialize)]
 struct Account {
     owner: Id<Person>,
     balance: f32,
@@ -396,14 +437,14 @@ struct DatabaseB {
 #[macro_export]
 macro_rules! database {
     ($name:ident { $($table:ident: $type:ty),* $(,)? }) => {
-        #[derive(Default)]
+        #[derive(Default, rql::prelude::Serialize, rql::prelude::Deserialize)]
         struct $name {
             $(pub $table: rql::Table<$type>),*
         }
         database!(impl $name);
     };
     (pub $name:ident { $($table:ident: $type:ty),* $(,)? }) => {
-        #[derive(Default)]
+        #[derive(Default, rql::prelude::Serialize, rql::prelude::Deserialize)]
         pub struct $name {
             $(pub $table: rql::Table<$type>),*
         }
@@ -456,11 +497,7 @@ mod tests {
         {
             println!("{:?}", s);
         }
-        for mut s in db.strings.update().only(|s| s.contains('h')) {
-            *s = "wow".into()
-        }
-        for s in db.strings.rows() {
-            println!("{}", s);
-        }
+        db.strings.delete_where(|s| s.contains('h'));
+        assert_eq!(1, db.strings.len());
     }
 }

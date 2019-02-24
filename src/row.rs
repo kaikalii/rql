@@ -9,8 +9,8 @@ use crate::Id;
 
 /// A row in a `Table`
 pub struct Row<'a, T> {
-    id: Id<T>,
-    data: &'a T,
+    pub(crate) id: Id<T>,
+    pub(crate) data: &'a T,
 }
 
 impl<'a, T> Row<'a, T> {
@@ -334,5 +334,41 @@ impl<'a, T> Iterator for RowIterMut<'a, T> {
     type Item = RowMut<'a, T>;
     fn next(&mut self) -> Option<Self::Item> {
         self.inner.next().map(|(id, data)| RowMut { id: *id, data })
+    }
+}
+
+/// A trait for getting row `Id`s
+pub trait Idd {
+    /// The type of the row
+    type RowType;
+    /// Get the row's id
+    fn id(&self) -> Id<Self::RowType>;
+}
+
+impl<T> Idd for Id<T> {
+    type RowType = T;
+    fn id(&self) -> Id<Self::RowType> {
+        *self
+    }
+}
+
+impl<'a, T> Idd for Row<'a, T> {
+    type RowType = T;
+    fn id(&self) -> Id<Self::RowType> {
+        self.id
+    }
+}
+
+impl<'a, T> Idd for RowMut<'a, T> {
+    type RowType = T;
+    fn id(&self) -> Id<Self::RowType> {
+        self.id
+    }
+}
+
+impl<I, T> Idd for MappedRow<I, T> {
+    type RowType = I;
+    fn id(&self) -> Id<Self::RowType> {
+        self.id
     }
 }
