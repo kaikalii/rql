@@ -173,6 +173,16 @@ pub trait HasRows<'a>: Sized {
     {
         Relate::new(self.rows(), other.rows(), f)
     }
+    /// Restricts the rows
+    fn only<F>(self, f: F) -> Only<Self::Iter, F>
+    where
+        F: Fn(&<Self::Iter as Iterator>::Item) -> bool,
+    {
+        Only {
+            iter: self.rows(),
+            clause: f,
+        }
+    }
 }
 
 impl<'a, I> HasRows<'a> for I
@@ -312,6 +322,34 @@ where
 }
 
 /**
+A clause for searching through rows and limiting
+the returned values, similar to a sql `WHERE`
+*/
+pub struct Only<I, F> {
+    iter: I,
+    clause: F,
+}
+
+impl<I, F> Iterator for Only<I, F>
+where
+    I: Iterator,
+    F: Fn(&I::Item) -> bool,
+{
+    type Item = I::Item;
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            if let Some(next) = self.iter.next() {
+                if (self.clause)(&next) {
+                    return Some(next);
+                }
+            } else {
+                return None;
+            }
+        }
+    }
+}
+
+/**
 Macro for generating a database `struct`
 
 `database!` generates the structure itself as well as necessary
@@ -411,8 +449,11 @@ mod tests {
         {
             println!("{:?}", s);
         }
-        for mut s in db.strings.update() {
+        for mut s in db.strings.update().only(|s| s.contains('h')) {
             *s = "wow".into()
+        }
+        for s in db.strings.rows() {
+            println!("{}", s);
         }
     }
 }
