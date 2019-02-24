@@ -183,6 +183,13 @@ pub trait HasRows<'a>: Sized {
             clause: f,
         }
     }
+    /// Tries to find a row that satisfies the clause
+    fn find<F>(self, f: F) -> Option<<Self::Iter as Iterator>::Item>
+    where
+        F: Fn(&<Self::Iter as Iterator>::Item) -> bool,
+    {
+        self.only(f).next()
+    }
 }
 
 impl<'a, I> HasRows<'a> for I
