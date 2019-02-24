@@ -147,9 +147,9 @@ impl<T> Table<T> {
     /// Delete rows that satisfy the clause
     pub fn delete_where<F>(&mut self, f: F)
     where
-        F: Fn(Row<T>) -> bool,
+        F: Fn(&T) -> bool,
     {
-        self.map.retain(|id, data| !f(Row { id: *id, data }))
+        self.map.retain(|_, data| !f(data))
     }
     /// Delete rows with ids returned by an iterator
     pub fn delete_iter<'a, F, I, R>(&'a mut self, f: F)
