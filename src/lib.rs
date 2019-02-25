@@ -118,8 +118,10 @@ impl<T> Table<T> {
         self.map.is_empty()
     }
     /// Insert a row into the `Table`
-    pub fn insert(&mut self, row: T) {
-        self.map.insert(Id::new(), row);
+    pub fn insert(&mut self, row: T) -> Id<T> {
+        let id = Id::new();
+        self.map.insert(id, row);
+        id
     }
     /// Try to get a reference to the row with the given `Id`
     pub fn get(&self, id: Id<T>) -> Option<&T> {
@@ -407,8 +409,7 @@ The type parameter `S` should be your schema type
 */
 #[derive(Default, Serialize, Deserialize)]
 pub struct Database<S> {
-    /// The database's tables
-    pub tables: S,
+    tables: S,
 }
 
 impl<S> Database<S>
@@ -420,6 +421,14 @@ where
         Database {
             tables: Default::default(),
         }
+    }
+    /// Get a reference to the `Database`'s tables
+    pub fn tables(&self) -> &S {
+        &self.tables
+    }
+    /// Get a mutable reference to the `Database`'s tables
+    pub fn tables_mut(&mut self) -> &mut S {
+        &mut self.tables
     }
 }
 
