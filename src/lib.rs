@@ -554,11 +554,7 @@ mod tests {
         {
             println!("{:?}", s);
         }
-        for s in db
-            .strings
-            .select(|row| row.map(|s| s.len()))
-            .relate(&db.nums, |a, b| a == b)
-        {
+        for s in db.strings.relate(&db.nums, |s, n| s.len() == **n) {
             println!("{:?}", s);
         }
         db.strings.delete_where(|s| s.contains('h'));
