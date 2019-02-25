@@ -36,6 +36,7 @@ pub mod prelude {
 #[serde(transparent)]
 pub struct Id<T> {
     uuid: Uuid,
+    #[serde(skip)]
     pd: PhantomData<T>,
 }
 
@@ -532,7 +533,7 @@ mod tests {
     }
     use super::*;
     #[test]
-    fn compiles() {
+    fn compiles() -> Result<(), Box<dyn Error>> {
         schema! {
             Schema {
                 nums: usize,
@@ -562,5 +563,7 @@ mod tests {
         }
         db.strings.delete_where(|s| s.contains('h'));
         assert_eq!(1, db.strings.len());
+        Database::<Schema>::load_from_bytes(db.save_to_bytes()?)?;
+        Ok(())
     }
 }

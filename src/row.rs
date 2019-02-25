@@ -9,8 +9,10 @@ use crate::Id;
 
 /// A row in a `Table`
 pub struct Row<'a, T> {
-    pub(crate) id: Id<T>,
-    pub(crate) data: &'a T,
+    /// The `Row`'s id
+    pub id: Id<T>,
+    /// The `Row`'s data
+    pub data: &'a T,
 }
 
 impl<'a, T> Row<'a, T> {
@@ -103,8 +105,10 @@ where
 
 /// A mutable row in a `Table`
 pub struct RowMut<'a, T> {
-    id: Id<T>,
-    data: &'a mut T,
+    /// The `RowMut`'s id
+    pub id: Id<T>,
+    /// The `RowMut`'s data
+    pub data: &'a mut T,
 }
 
 impl<'a, T> RowMut<'a, T> {
