@@ -231,7 +231,7 @@ pub trait HasRows: Sized {
     }
 }
 
-impl<'a, I> HasRows for I
+impl<I> HasRows for I
 where
     I: Iterator,
 {
@@ -269,7 +269,7 @@ pub trait HasRowsMut: Sized {
     }
 }
 
-impl<'a, I> HasRowsMut for I
+impl<I> HasRowsMut for I
 where
     I: Iterator,
 {
