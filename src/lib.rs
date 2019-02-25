@@ -12,7 +12,6 @@ mod row;
 pub use row::*;
 
 use std::{
-    error::Error,
     fmt, fs,
     hash::{Hash, Hasher},
     marker::PhantomData,
@@ -30,6 +29,47 @@ pub mod prelude {
     pub use crate::{schema, Database, HasRows, HasRowsMut, Id, Table};
     pub use serde_derive::{Deserialize, Serialize};
 }
+
+/// An error type for `rql`
+#[derive(Debug)]
+pub enum Error {
+    /// An io error
+    Io(std::io::Error),
+    /// A serial encoding error
+    Encode(rmp_serde::encode::Error),
+    /// A serial decoding error
+    Decode(rmp_serde::decode::Error),
+}
+
+macro_rules! error_from {
+    ($variant:ident: $type:ty) => {
+        impl From<$type> for Error {
+            fn from(e: $type) -> Self {
+                Error::$variant(e)
+            }
+        }
+    };
+}
+
+error_from!(Io: std::io::Error);
+error_from!(Encode: rmp_serde::encode::Error);
+error_from!(Decode: rmp_serde::decode::Error);
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        use Error::*;
+        match self {
+            Io(e) => write!(f, "{}", e),
+            Encode(e) => write!(f, "{}", e),
+            Decode(e) => write!(f, "{}", e),
+        }
+    }
+}
+
+impl std::error::Error for Error {}
+
+/// A result type for `rql`
+pub type Result<T> = std::result::Result<T, Error>;
 
 /// An id for indexing rows
 #[derive(Serialize, Deserialize)]
@@ -437,12 +477,12 @@ where
     S: Serialize,
 {
     /// Save the database to a file
-    pub fn save<P: AsRef<Path>>(&self, path: P) -> Result<(), Box<dyn Error>> {
+    pub fn save<P: AsRef<Path>>(&self, path: P) -> Result<()> {
         fs::write(path, self.save_to_bytes()?)?;
         Ok(())
     }
     /// Save the database to a byte vector
-    pub fn save_to_bytes(&self) -> Result<Vec<u8>, Box<dyn Error>> {
+    pub fn save_to_bytes(&self) -> Result<Vec<u8>> {
         Ok(rmp_serde::to_vec(self)?)
     }
 }
@@ -452,11 +492,11 @@ where
     S: DeserializeOwned,
 {
     /// Load a database from a file
-    pub fn load<P: AsRef<Path>>(path: P) -> Result<Self, Box<dyn Error>> {
+    pub fn load<P: AsRef<Path>>(path: P) -> Result<Self> {
         Database::load_from_bytes(fs::read(path)?)
     }
     /// Load a database from a byte array
-    pub fn load_from_bytes<B: AsRef<[u8]>>(bytes: B) -> Result<Self, Box<dyn Error>> {
+    pub fn load_from_bytes<B: AsRef<[u8]>>(bytes: B) -> Result<Self> {
         Ok(rmp_serde::from_slice(bytes.as_ref())?)
     }
 }
@@ -517,6 +557,7 @@ struct SchemaB {
 macro_rules! schema {
     ($name:ident { $($table:ident: $type:ty),* $(,)? }) => {
         #[derive(Default, rql::prelude::Serialize, rql::prelude::Deserialize)]
+        #[serde(default)]
         struct $name {
             $(pub $table: rql::Table<$type>),*
         }
@@ -524,6 +565,7 @@ macro_rules! schema {
     };
     (pub $name:ident { $($table:ident: $type:ty),* $(,)? }) => {
         #[derive(Default, rql::prelude::Serialize, rql::prelude::Deserialize)]
+        #[serde(default)]
         pub struct $name {
             $(pub $table: rql::Table<$type>),*
         }
@@ -542,7 +584,7 @@ mod tests {
     }
     use super::*;
     #[test]
-    fn compiles() -> Result<(), Box<dyn Error>> {
+    fn compiles() -> Result<()> {
         schema! {
             Schema {
                 nums: usize,
