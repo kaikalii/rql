@@ -1,11 +1,20 @@
-[package]
-name = "rql"
-version = "0.1.0"
-authors = ["Kai Schmidt <kaikaliischmidt@gmail.com>"]
-edition = "2018"
-
 [dependencies]
-uuid = { version = "*", features = ["v4", "serde"] }
-serde = "*"
-serde_derive = "*"
-hashbrown = { version = "*", features = ["serde"] }
+serde = '1.0.88'
+serde_derive = '1.0.88'
+
+[dependencies.hashbrown]
+features = ['serde']
+version = '0.1.8'
+
+[dependencies.uuid]
+features = [
+    'v4',
+    'serde',
+]
+version = '0.7.2'
+
+[package]
+authors = ['Kai Schmidt <kaikaliischmidt@gmail.com>']
+edition = '2018'
+name = 'rql'
+version = '0.1.0'
