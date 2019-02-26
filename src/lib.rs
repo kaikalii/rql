@@ -26,7 +26,7 @@ use uuid::Uuid;
 
 /// A prelude for commonly used imports
 pub mod prelude {
-    pub use crate::{schema, Database, HasRows, HasRowsMut, Id, Table};
+    pub use crate::{schema, Database, HasRows, HasRowsMut, Id, Row, RowMut, Table};
     pub use serde_derive::{Deserialize, Serialize};
 }
 
