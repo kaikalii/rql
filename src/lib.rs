@@ -187,16 +187,20 @@ impl<T> Table<T> {
             inner: self.map.iter_mut(),
         }
     }
-    /// Delete a single row based on its `Id`
-    pub fn delete_one(&mut self, id: Id<T>) {
-        self.remove(id);
+    /// Delete a single row based on its `Id` and return the value
+    pub fn delete_one(&mut self, id: Id<T>) -> Option<T> {
+        self.remove(id)
     }
     /// Delete rows that satisfy the clause
-    pub fn delete_where<F>(&mut self, f: F)
+    ///
+    /// Returns how many rows where deleted
+    pub fn delete_where<F>(&mut self, f: F) -> usize
     where
         F: Fn(&T) -> bool,
     {
-        self.map.retain(|_, data| !f(data))
+        let count = self.map.values().filter(|data| f(data)).count();
+        self.map.retain(|_, data| !f(data));
+        count
     }
     /// Delete rows with ids returned by an iterator
     pub fn delete_iter<'a, F, I, R>(&'a mut self, f: F)
