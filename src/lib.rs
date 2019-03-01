@@ -447,6 +447,46 @@ where
 }
 
 /**
+Ways of serializing/deserializing data
+*/
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum Representation {
+    /**
+    A binary format that is not tolerant to schema changes
+
+    Use this only if you are absolutely certain that your schema
+    will not change.
+
+    Uses [bincode](https://github.com/TyOverby/bincode)
+    */
+    BinaryStable,
+    /**
+    (Default) A binary format that is tolerant to certain schema changes
+
+    Columns and tables can be added, but not reordered or removed.
+    Use serde attributes to enable backward compatibility.
+
+    Uses [MessagePack](https://github.com/3Hren/msgpack-rust)
+    */
+    BinaryDynamic,
+    /**
+    A human readable format that is tolerant to most schema changes.
+
+    Columns and tables can be added, but not reordered or removed.
+    Use serde attributes to enable backward compatibility.
+
+    Uses [YAML](https://github.com/dtolnay/serde-yaml)
+    */
+    HumanReadable,
+}
+
+impl Default for Representation {
+    fn default() -> Self {
+        Representation::BinaryDynamic
+    }
+}
+
+/**
 An in-memory pseudo database
 
 The type parameter `S` should be your schema type
