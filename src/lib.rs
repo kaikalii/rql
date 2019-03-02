@@ -10,6 +10,7 @@ and adapters applied to iterators and hashmaps
 
 mod row;
 pub use row::*;
+pub mod repr;
 
 use std::{
     fmt, fs,
@@ -24,6 +25,8 @@ use serde::{de::DeserializeOwned, Serialize};
 use serde_derive::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::repr::*;
+
 /// A prelude for commonly used imports
 pub mod prelude {
     pub use crate::{schema, Database, HasRows, HasRowsMut, Id, Row, RowMut, Table};
@@ -32,18 +35,33 @@ pub mod prelude {
 
 /// An error type for `rql`
 #[derive(Debug)]
-pub enum Error {
+pub enum Error<R>
+where
+    R: Representation,
+{
     /// An io error
     Io(std::io::Error),
     /// A serial encoding error
-    Encode(rmp_serde::encode::Error),
+    Encode(R::EncodeError),
     /// A serial decoding error
-    Decode(rmp_serde::decode::Error),
+    Decode(R::DecodeError),
+    /// A serial encoding or decoding error
+    EnDecode(R::EncodeError),
 }
 
 macro_rules! error_from {
     ($variant:ident: $type:ty) => {
-        impl From<$type> for Error {
+        impl<R> From<$type> for Error<R>
+        where
+            R: Representation,
+        {
+            fn from(e: $type) -> Self {
+                Error::$variant(e)
+            }
+        }
+    };
+    ($variant:ident<$param:ident>: $type:ty) => {
+        impl From<$type> for Error<$param> {
             fn from(e: $type) -> Self {
                 Error::$variant(e)
             }
@@ -52,24 +70,30 @@ macro_rules! error_from {
 }
 
 error_from!(Io: std::io::Error);
-error_from!(Encode: rmp_serde::encode::Error);
-error_from!(Decode: rmp_serde::decode::Error);
+error_from!(EnDecode<BinaryStable>: bincode::Error);
+error_from!(Encode<BinaryDynamic>: rmp_serde::encode::Error);
+error_from!(Decode<BinaryDynamic>: rmp_serde::decode::Error);
+error_from!(EnDecode<HumanReadable>: serde_yaml::Error);
 
-impl fmt::Display for Error {
+impl<R> fmt::Display for Error<R>
+where
+    R: Representation,
+{
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use Error::*;
         match self {
             Io(e) => write!(f, "{}", e),
             Encode(e) => write!(f, "{}", e),
             Decode(e) => write!(f, "{}", e),
+            EnDecode(e) => write!(f, "{}", e),
         }
     }
 }
 
-impl std::error::Error for Error {}
+impl<R> std::error::Error for Error<R> where R: Representation {}
 
 /// A result type for `rql`
-pub type Result<T> = std::result::Result<T, Error>;
+pub type Result<T, R> = std::result::Result<T, Error<R>>;
 
 /// An id for indexing rows
 #[derive(Serialize, Deserialize)]
@@ -447,56 +471,18 @@ where
 }
 
 /**
-Ways of serializing/deserializing data
-*/
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub enum Representation {
-    /**
-    A binary format that is not tolerant to schema changes
-
-    Use this only if you are absolutely certain that your schema
-    will not change.
-
-    Uses [bincode](https://github.com/TyOverby/bincode)
-    */
-    BinaryStable,
-    /**
-    (Default) A binary format that is tolerant to certain schema changes
-
-    Columns and tables can be added, but not reordered or removed.
-    Use serde attributes to enable backward compatibility.
-
-    Uses [MessagePack](https://github.com/3Hren/msgpack-rust)
-    */
-    BinaryDynamic,
-    /**
-    A human readable format that is tolerant to most schema changes.
-
-    Columns and tables can be added, but not reordered or removed.
-    Use serde attributes to enable backward compatibility.
-
-    Uses [YAML](https://github.com/dtolnay/serde-yaml)
-    */
-    HumanReadable,
-}
-
-impl Default for Representation {
-    fn default() -> Self {
-        Representation::BinaryDynamic
-    }
-}
-
-/**
 An in-memory pseudo database
 
 The type parameter `S` should be your schema type
 */
 #[derive(Default, Serialize, Deserialize)]
-pub struct Database<S> {
+pub struct Database<S, R> {
     tables: S,
+    #[serde(skip)]
+    repr: PhantomData<R>,
 }
 
-impl<S> Database<S>
+impl<S, R> Database<S, R>
 where
     S: Default,
 {
@@ -504,6 +490,7 @@ where
     pub fn new() -> Self {
         Database {
             tables: Default::default(),
+            repr: PhantomData,
         }
     }
     /// Get a reference to the `Database`'s tables
@@ -516,43 +503,47 @@ where
     }
 }
 
-impl<S> Database<S>
+impl<S, R> Database<S, R>
 where
     S: Serialize,
+    R: Representation,
+    Error<R>: From<R::EncodeError>,
 {
     /// Save the database to a file
-    pub fn save<P: AsRef<Path>>(&self, path: P) -> Result<()> {
+    pub fn save<P: AsRef<Path>>(&self, path: P) -> Result<(), R> {
         fs::write(path, self.save_to_bytes()?)?;
         Ok(())
     }
     /// Save the database to a byte vector
-    pub fn save_to_bytes(&self) -> Result<Vec<u8>> {
-        Ok(rmp_serde::to_vec(self)?)
+    pub fn save_to_bytes(&self) -> Result<Vec<u8>, R> {
+        Ok(R::serialize(self)?)
     }
 }
 
-impl<S> Database<S>
+impl<S, R> Database<S, R>
 where
     S: DeserializeOwned,
+    R: Representation,
+    Error<R>: From<R::DecodeError>,
 {
     /// Load a database from a file
-    pub fn load<P: AsRef<Path>>(path: P) -> Result<Self> {
+    pub fn load<P: AsRef<Path>>(path: P) -> Result<Self, R> {
         Database::load_from_bytes(fs::read(path)?)
     }
     /// Load a database from a byte array
-    pub fn load_from_bytes<B: AsRef<[u8]>>(bytes: B) -> Result<Self> {
-        Ok(rmp_serde::from_slice(bytes.as_ref())?)
+    pub fn load_from_bytes<B: AsRef<[u8]>>(bytes: B) -> Result<Self, R> {
+        Ok(R::deserialize(bytes)?)
     }
 }
 
-impl<S> Deref for Database<S> {
+impl<S, R> Deref for Database<S, R> {
     type Target = S;
     fn deref(&self) -> &Self::Target {
         &self.tables
     }
 }
 
-impl<S> DerefMut for Database<S> {
+impl<S, R> DerefMut for Database<S, R> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.tables
     }
@@ -628,14 +619,14 @@ mod tests {
     }
     use super::*;
     #[test]
-    fn compiles() -> Result<()> {
+    fn compiles() -> Result<(), BinaryStable> {
         schema! {
             Schema {
                 nums: usize,
                 strings: String,
             }
         }
-        let mut db: Database<Schema> = Database::new();
+        let mut db: Database<Schema, BinaryStable> = Database::new();
         db.nums.insert(4);
         db.nums.insert(2);
         db.nums.insert(5);
@@ -654,7 +645,7 @@ mod tests {
         }
         db.strings.delete_where(|s| s.contains('h'));
         assert_eq!(1, db.strings.len());
-        Database::<Schema>::load_from_bytes(db.save_to_bytes()?)?;
+        Database::<Schema, BinaryStable>::load_from_bytes(db.save_to_bytes()?)?;
         Ok(())
     }
 }
