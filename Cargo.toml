@@ -1,8 +1,8 @@
 [dependencies]
 bincode = '1.1.2'
 rmp-serde = '0.13.7'
-serde = '1.0.88'
-serde_derive = '1.0.88'
+serde = '1.0.89'
+serde_derive = '1.0.89'
 serde_yaml = '0.8.8'
 
 [dependencies.hashbrown]
