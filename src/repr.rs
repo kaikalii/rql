@@ -87,7 +87,7 @@ impl Representation for BinaryDynamic {
 /**
 A human readable format that is tolerant to most schema changes.
 
-Columns and tables can be added, but not reordered or removed.
+Columns and tables can be added, reordered, or removed.
 Use serde attributes to enable backward compatibility.
 
 Uses [YAML](https://github.com/dtolnay/serde-yaml)

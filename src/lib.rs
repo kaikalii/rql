@@ -476,7 +476,7 @@ An in-memory pseudo database
 The type parameter `S` should be your schema type
 */
 #[derive(Default, Serialize, Deserialize)]
-pub struct Database<S, R> {
+pub struct Database<S, R = BinaryDynamic> {
     tables: S,
     #[serde(skip)]
     repr: PhantomData<R>,
@@ -615,18 +615,18 @@ mod tests {
     /// Reexport everything from `rql` so macros work
     /// as if this is a foreign library
     mod rql {
-        pub use super::super::*;
+        pub use crate::*;
     }
     use super::*;
     #[test]
-    fn compiles() -> Result<(), BinaryStable> {
+    fn compiles() -> Result<(), BinaryDynamic> {
         schema! {
             Schema {
                 nums: usize,
                 strings: String,
             }
         }
-        let mut db: Database<Schema, BinaryStable> = Database::new();
+        let mut db: Database<Schema> = Database::new();
         db.nums.insert(4);
         db.nums.insert(2);
         db.nums.insert(5);
@@ -645,7 +645,7 @@ mod tests {
         }
         db.strings.delete_where(|s| s.contains('h'));
         assert_eq!(1, db.strings.len());
-        Database::<Schema, BinaryStable>::load_from_bytes(db.save_to_bytes()?)?;
+        Database::<Schema>::load_from_bytes(db.save_to_bytes()?)?;
         Ok(())
     }
 }
