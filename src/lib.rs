@@ -93,7 +93,7 @@ where
 impl<R> std::error::Error for Error<R> where R: Representation {}
 
 /// A result type for `rql`
-pub type Result<T, R> = std::result::Result<T, Error<R>>;
+pub type Result<T, R = BinaryDynamic> = std::result::Result<T, Error<R>>;
 
 /// An id for indexing rows
 #[derive(Serialize, Deserialize)]
@@ -619,7 +619,7 @@ mod tests {
     }
     use super::*;
     #[test]
-    fn compiles() -> Result<(), BinaryDynamic> {
+    fn compiles() -> Result<()> {
         schema! {
             Schema {
                 nums: usize,
