@@ -22,7 +22,7 @@ use std::{
 
 use hashbrown::HashMap;
 use serde::{de::DeserializeOwned, Serialize};
-use serde_derive::{Deserialize, Serialize};
+use serde_derive::{Deserialize as Des, Serialize as Ser};
 use uuid::Uuid;
 
 use crate::repr::*;
@@ -96,7 +96,7 @@ impl<R> std::error::Error for Error<R> where R: Representation {}
 pub type Result<T, R> = std::result::Result<T, Error<R>>;
 
 /// An id for indexing rows
-#[derive(Serialize, Deserialize)]
+#[derive(Ser, Des)]
 #[serde(transparent)]
 pub struct Id<T> {
     uuid: Uuid,
@@ -160,7 +160,7 @@ impl<T> Default for Id<T> {
 /**
 A table abstraction akin to a table in a real schema
 */
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Ser, Des)]
 #[serde(transparent)]
 pub struct Table<T> {
     map: HashMap<Id<T>, T>,
@@ -475,7 +475,7 @@ An in-memory pseudo database
 
 The type parameter `S` should be your schema type
 */
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Default, Ser, Des)]
 pub struct Database<S, R = BinaryDynamic> {
     tables: S,
     #[serde(skip)]

@@ -5,7 +5,7 @@ Ways of serializing/deserializing data
 use std::fmt;
 
 use serde::{de::DeserializeOwned, Serialize};
-use serde_derive::{Deserialize, Serialize};
+use serde_derive::{Deserialize as Des, Serialize as Ser};
 
 /**
 A trait for representations
@@ -34,7 +34,7 @@ will not change.
 
 Uses [bincode](https://github.com/TyOverby/bincode)
 */
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Ser, Des)]
 pub struct BinaryStable;
 
 impl Representation for BinaryStable {
@@ -63,7 +63,7 @@ Use serde attributes to enable backward compatibility.
 
 Uses [MessagePack](https://github.com/3Hren/msgpack-rust)
 */
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Ser, Des)]
 pub struct BinaryDynamic;
 
 impl Representation for BinaryDynamic {
@@ -92,7 +92,7 @@ Use serde attributes to enable backward compatibility.
 
 Uses [YAML](https://github.com/dtolnay/serde-yaml)
 */
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Ser, Des)]
 pub struct HumanReadable;
 
 impl Representation for HumanReadable {
