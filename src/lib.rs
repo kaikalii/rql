@@ -5,7 +5,162 @@
 
 RQL (Rusty Query Language) is a library design to bring sql-like logic to Rust.
 However, bear in mind that there is no traditional database here, just some traits
-and adapters applied to iterators and hashmaps
+and adapters applied to iterators and hashmaps.
+
+### *Important Note*
+
+**`rql` does not provide a real database.** All data is stored in memory. This
+pseudo-database can be saved to and loaded from the disk via serialization and
+deserialization from `serde`. A number of serialization protocols are supported
+so that you may choose one to suit your speed, size, and backward-compatibility
+needs.
+
+# Schema
+
+To use an `rql` database, you must first define some schema. Every table is defined
+by a struct representing a single entry. In this example, we will define three tables:
+User, Group, and Member.
+
+```
+use rql::prelude::*;
+
+#[derive(Serialize, Deserialize)]
+struct User {
+    name: String,
+    age: u8,
+}
+
+#[derive(Serialize, Deserialize)]
+struct Group {
+    name: String,
+}
+
+#[derive(Serialize, Deserialize)]
+struct Member {
+    user_id: Id<User>,
+    group_id: Id<Group>,
+    permission: bool,
+}
+```
+
+Unique id fields are not necessary, as every entry is automatically
+given a unique identifier. References to entries in other tables
+are denoted with `Id<T>`.
+
+To make the actual schema, use the `schema!` macro:
+
+```
+# use rql::prelude::*;
+# #[derive(Serialize, Deserialize)]
+# struct User {
+#     name: String,
+#     age: u8,
+# }
+# #[derive(Serialize, Deserialize)]
+# struct Group {
+#     name: String,
+# }
+# #[derive(Serialize, Deserialize)]
+# struct Member {
+#     user_id: Id<User>,
+#     group_id: Id<Group>,
+#     permission: bool,
+# }
+schema! {
+    MySchema {
+        user: User,
+        group: Group,
+        member: Member,
+    }
+}
+```
+
+# Database operations
+
+Below are a few simple ways of interfacing with the database.
+
+```
+# use rql::prelude::*;
+# #[derive(Serialize, Deserialize)]
+# struct User {
+#     name: String,
+#     age: u8,
+# }
+# #[derive(Serialize, Deserialize)]
+# struct Group {
+#     name: String,
+# }
+# #[derive(Serialize, Deserialize)]
+# struct Member {
+#     user_id: Id<User>,
+#     group_id: Id<Group>,
+#     permission: bool,
+# }
+# schema! {
+#     MySchema {
+#         user: User,
+#         group: Group,
+#         member: Member,
+#     }
+# }
+// Create a new database with the previously defined schema
+let mut db = Database::<MySchema>::new();
+
+// Insert values into the database
+// Insertion returns the new row's id
+let dan   = db.user.insert(User { name: "Dan".into(),   age: 25 });
+let steve = db.user.insert(User { name: "Steve".into(), age: 39 });
+let mary  = db.user.insert(User { name: "Mary".into(),  age: 31 });
+
+let admin  = db.group.insert(Group { name: "Admin".into()       });
+let normal = db.group.insert(Group { name: "Normal User".into() });
+
+db.member.insert(Member { user_id: dan,   group_id: admin,  permission: true  });
+db.member.insert(Member { user_id: steve, group_id: normal, permission: true  });
+db.member.insert(Member { user_id: mary,  group_id: normal, permission: false });
+
+// Data can easily be looked up by id
+db.user.get_mut(dan).unwrap().age += 1;
+let dan_age = db.user.get(dan).unwrap().age;
+assert_eq!(dan_age, 26);
+
+// Data can be selected from a table
+let ages: Vec<u8> = db.user.select(|user| user.age).collect();
+
+// Use `wher` to filter entries
+let can_run_for_president: Vec<String> =
+    db.user
+        .wher(|user| user.age >= 35)
+        .select(|user| user.name.clone())
+        .collect();
+
+// Table intersections are done using `relate`
+// A function relating the tables is required
+for (user, permission) in db.user
+    .relate(
+        &db.member,
+        |user, member| user.id == member.user_id && member.group_id == normal
+    )
+    .select(|(user, member)| (&user.data.name, member.permission)) {
+    println!("{} is a normal user with permission = {}", user, permission);
+}
+
+// Rows can be updated with `update`
+for mut user in db.user.update() {
+    user.age += 1;
+}
+
+// Rows can be deleted in a few ways
+
+// By id
+db.user.delete_one(steve);
+
+// With a where clause
+db.member.delete_where(|member| member.permission);
+
+// With an iterator over ids
+db.user.delete_iter(|_| vec![dan, mary]);
+```
 */
 
 mod row;
@@ -22,7 +177,7 @@ use std::{
 
 use hashbrown::HashMap;
 use serde::{de::DeserializeOwned, Serialize};
-use serde_derive::{Deserialize, Serialize};
+use serde_derive::{Deserialize as Des, Serialize as Ser};
 use uuid::Uuid;
 
 use crate::repr::*;
@@ -96,7 +251,7 @@ impl<R> std::error::Error for Error<R> where R: Representation {}
 pub type Result<T, R = BinaryDynamic> = std::result::Result<T, Error<R>>;
 
 /// An id for indexing rows
-#[derive(Serialize, Deserialize)]
+#[derive(Ser, Des)]
 #[serde(transparent)]
 pub struct Id<T> {
     uuid: Uuid,
@@ -160,7 +315,7 @@ impl<T> Default for Id<T> {
 /**
 A table abstraction akin to a table in a real schema
 */
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Ser, Des)]
 #[serde(transparent)]
 pub struct Table<T> {
     map: HashMap<Id<T>, T>,
@@ -230,10 +385,11 @@ impl<T> Table<T> {
     pub fn delete_iter<'a, F, I, R>(&'a mut self, f: F)
     where
         F: Fn(&'a Self) -> I,
-        I: Iterator<Item = R>,
+        I: IntoIterator<Item = R>,
         R: Idd<RowType = T>,
     {
         let ids: Vec<Id<T>> = f(unsafe { (self as *mut Self).as_mut() }.unwrap())
+            .into_iter()
             .map(|row| row.id())
             .collect();
         for id in ids {
@@ -475,7 +631,7 @@ An in-memory pseudo database
 
 The type parameter `S` should be your schema type
 */
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Default, Ser, Des)]
 pub struct Database<S, R = BinaryDynamic> {
     tables: S,
     #[serde(skip)]
