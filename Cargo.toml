@@ -24,7 +24,7 @@ categories = [
     'data-structures',
 ]
 description = 'An in-memory pseudo database that provides functionality for managing pseudo-relational tables and their schema'
-documentation = 'docs.rs/rql'
+documentation = 'https://docs.rs/rql'
 edition = '2018'
 keywords = [
     'sql',
