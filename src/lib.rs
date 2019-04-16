@@ -200,26 +200,16 @@ pub mod prelude {
 
 /// An error type for `rql`
 #[derive(Debug)]
-pub enum Error<R>
-where
-    R: Representation,
-{
+pub enum Error {
     /// An io error
     Io(std::io::Error),
-    /// A serial encoding error
-    Encode(R::EncodeError),
-    /// A serial decoding error
-    Decode(R::DecodeError),
-    /// A serial encoding or decoding error
-    EnDecode(R::EncodeError),
+    /// A serialization/deserialization error
+    Serialization(Box<dyn std::error::Error>),
 }
 
 macro_rules! error_from {
     ($variant:ident: $type:ty) => {
-        impl<R> From<$type> for Error<R>
-        where
-            R: Representation,
-        {
+        impl From<$type> for Error {
             fn from(e: $type) -> Self {
                 Error::$variant(e)
             }
@@ -235,30 +225,21 @@ macro_rules! error_from {
 }
 
 error_from!(Io: std::io::Error);
-error_from!(EnDecode<BinaryStable>: bincode::Error);
-error_from!(Encode<BinaryDynamic>: rmp_serde::encode::Error);
-error_from!(Decode<BinaryDynamic>: rmp_serde::decode::Error);
-error_from!(EnDecode<HumanReadable>: serde_yaml::Error);
 
-impl<R> fmt::Display for Error<R>
-where
-    R: Representation,
-{
+impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use Error::*;
         match self {
             Io(e) => write!(f, "{}", e),
-            Encode(e) => write!(f, "{}", e),
-            Decode(e) => write!(f, "{}", e),
-            EnDecode(e) => write!(f, "{}", e),
+            Serialization(e) => write!(f, "{}", e),
         }
     }
 }
 
-impl<R> std::error::Error for Error<R> where R: Representation {}
+impl std::error::Error for Error {}
 
 /// A result type for `rql`
-pub type Result<T, R = BinaryDynamic> = std::result::Result<T, Error<R>>;
+pub type Result<T> = std::result::Result<T, Error>;
 
 /// An id for indexing rows
 #[derive(Ser, Des)]
@@ -671,22 +652,20 @@ where
     S: Serialize,
 {
     /// Save the database to a file
-    pub fn save<R, P>(&self, repr: R, path: P) -> Result<(), R>
+    pub fn save<R, P>(&self, repr: R, path: P) -> Result<()>
     where
-        R: Representation,
-        Error<R>: From<R::EncodeError>,
+        R: Representation + 'static,
         P: AsRef<Path>,
     {
         fs::write(path, self.save_to_bytes(repr)?)?;
         Ok(())
     }
     /// Save the database to a byte vector
-    pub fn save_to_bytes<R>(&self, _repr: R) -> Result<Vec<u8>, R>
+    pub fn save_to_bytes<R>(&self, _repr: R) -> Result<Vec<u8>>
     where
-        R: Representation,
-        Error<R>: From<R::EncodeError>,
+        R: Representation + 'static,
     {
-        Ok(R::serialize(self)?)
+        R::serialize(self).map_err(|e| Error::Serialization(Box::new(e)))
     }
 }
 
@@ -695,21 +674,21 @@ where
     S: DeserializeOwned,
 {
     /// Load a database from a file
-    pub fn load<R, P>(repr: R, path: P) -> Result<Self, R>
+    pub fn load<R, P>(repr: R, path: P) -> Result<Self>
     where
-        R: Representation,
-        Error<R>: From<R::DecodeError>,
+        R: Representation + 'static,
         P: AsRef<Path>,
     {
         Database::load_from_bytes(repr, fs::read(path)?)
     }
     /// Load a database from a byte array
-    pub fn load_from_bytes<R, B: AsRef<[u8]>>(_repr: R, bytes: B) -> Result<Self, R>
+    pub fn load_from_bytes<R, B: AsRef<[u8]>>(_repr: R, bytes: B) -> Result<Self>
     where
-        R: Representation,
-        Error<R>: From<R::DecodeError>,
+        R: Representation + 'static,
     {
-        Ok(R::deserialize(bytes)?)
+        R::deserialize(bytes)
+            .map_err(Box::new)
+            .map_err(|e| Error::Serialization(Box::new(e)))
     }
 }
 
@@ -796,7 +775,7 @@ mod tests {
     }
     use super::*;
     #[test]
-    fn compiles() -> Result<(), repr::BinaryStable> {
+    fn compiles() -> Result<()> {
         schema! {
             Schema {
                 nums: usize,
