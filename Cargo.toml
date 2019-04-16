@@ -18,6 +18,22 @@ version = '0.7.4'
 
 [package]
 authors = ['Kai Schmidt <kaikaliischmidt@gmail.com>']
+categories = [
+    'database',
+    'database-implementations',
+    'data-structures',
+]
+documentation = 'docs.rs/rql'
 edition = '2018'
+keywords = [
+    'sql',
+    'orm',
+    'in-memory',
+    'table',
+    'schema',
+]
+license = 'MIT'
 name = 'rql'
+readme = 'readme.md'
+repository = 'https://github.com/kaikalii/rql'
 version = '0.1.0'
