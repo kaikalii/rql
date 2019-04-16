@@ -160,6 +160,15 @@ db.member.delete_where(|member| member.permission);
 
 // With an iterator over ids
 db.user.delete_iter(|_| vec![dan, mary]);
+
+// The database can be saved
+db.save("database");
+
+// And loaded again
+let db_copy: Database<MySchema> = Database::load("database").unwrap();
+assert_eq!(db.user.len(),   db_copy.user.len()  );
+assert_eq!(db.group.len(),  db_copy.group.len() );
+assert_eq!(db.member.len(), db_copy.member.len());
 ```
 */
 
@@ -746,7 +755,7 @@ struct SchemaB {
 */
 #[macro_export]
 macro_rules! schema {
-    ($name:ident { $($table:ident: $type:ty),* $(,)? }) => {
+    ($name:ident { $($table:ident: $type:ty),* $(,)* }) => {
         #[derive(Default, rql::prelude::Serialize, rql::prelude::Deserialize)]
         #[serde(default)]
         struct $name {
@@ -754,7 +763,7 @@ macro_rules! schema {
         }
         schema!(impl $name);
     };
-    (pub $name:ident { $($table:ident: $type:ty),* $(,)? }) => {
+    (pub $name:ident { $($table:ident: $type:ty),* $(,)* }) => {
         #[derive(Default, rql::prelude::Serialize, rql::prelude::Deserialize)]
         #[serde(default)]
         pub struct $name {
