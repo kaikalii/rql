@@ -162,10 +162,11 @@ db.member.delete_where(|member| member.permission);
 db.user.delete_iter(|_| vec![dan, mary]);
 
 // The database can be saved
-db.save("database");
+// A representation must be specified
+db.save(repr::HumanReadable, "database.yaml");
 
-// And loaded again
-let db_copy: Database<MySchema> = Database::load("database").unwrap();
+// It can then be loaded again
+let db_copy: Database<MySchema> = Database::load(repr::HumanReadable, "database.yaml").unwrap();
 assert_eq!(db.user.len(),   db_copy.user.len()  );
 assert_eq!(db.group.len(),  db_copy.group.len() );
 assert_eq!(db.member.len(), db_copy.member.len());
@@ -641,13 +642,11 @@ An in-memory pseudo database
 The type parameter `S` should be your schema type
 */
 #[derive(Default, Ser, Des)]
-pub struct Database<S, R = BinaryDynamic> {
+pub struct Database<S> {
     tables: S,
-    #[serde(skip)]
-    repr: PhantomData<R>,
 }
 
-impl<S, R> Database<S, R>
+impl<S> Database<S>
 where
     S: Default,
 {
@@ -655,7 +654,6 @@ where
     pub fn new() -> Self {
         Database {
             tables: Default::default(),
-            repr: PhantomData,
         }
     }
     /// Get a reference to the `Database`'s tables
@@ -668,47 +666,61 @@ where
     }
 }
 
-impl<S, R> Database<S, R>
+impl<S> Database<S>
 where
     S: Serialize,
-    R: Representation,
-    Error<R>: From<R::EncodeError>,
 {
     /// Save the database to a file
-    pub fn save<P: AsRef<Path>>(&self, path: P) -> Result<(), R> {
-        fs::write(path, self.save_to_bytes()?)?;
+    pub fn save<R, P>(&self, repr: R, path: P) -> Result<(), R>
+    where
+        R: Representation,
+        Error<R>: From<R::EncodeError>,
+        P: AsRef<Path>,
+    {
+        fs::write(path, self.save_to_bytes(repr)?)?;
         Ok(())
     }
     /// Save the database to a byte vector
-    pub fn save_to_bytes(&self) -> Result<Vec<u8>, R> {
+    pub fn save_to_bytes<R>(&self, _repr: R) -> Result<Vec<u8>, R>
+    where
+        R: Representation,
+        Error<R>: From<R::EncodeError>,
+    {
         Ok(R::serialize(self)?)
     }
 }
 
-impl<S, R> Database<S, R>
+impl<S> Database<S>
 where
     S: DeserializeOwned,
-    R: Representation,
-    Error<R>: From<R::DecodeError>,
 {
     /// Load a database from a file
-    pub fn load<P: AsRef<Path>>(path: P) -> Result<Self, R> {
-        Database::load_from_bytes(fs::read(path)?)
+    pub fn load<R, P>(repr: R, path: P) -> Result<Self, R>
+    where
+        R: Representation,
+        Error<R>: From<R::DecodeError>,
+        P: AsRef<Path>,
+    {
+        Database::load_from_bytes(repr, fs::read(path)?)
     }
     /// Load a database from a byte array
-    pub fn load_from_bytes<B: AsRef<[u8]>>(bytes: B) -> Result<Self, R> {
+    pub fn load_from_bytes<R, B: AsRef<[u8]>>(_repr: R, bytes: B) -> Result<Self, R>
+    where
+        R: Representation,
+        Error<R>: From<R::DecodeError>,
+    {
         Ok(R::deserialize(bytes)?)
     }
 }
 
-impl<S, R> Deref for Database<S, R> {
+impl<S> Deref for Database<S> {
     type Target = S;
     fn deref(&self) -> &Self::Target {
         &self.tables
     }
 }
 
-impl<S, R> DerefMut for Database<S, R> {
+impl<S> DerefMut for Database<S> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.tables
     }
@@ -784,7 +796,7 @@ mod tests {
     }
     use super::*;
     #[test]
-    fn compiles() -> Result<()> {
+    fn compiles() -> Result<(), repr::BinaryStable> {
         schema! {
             Schema {
                 nums: usize,
@@ -810,7 +822,10 @@ mod tests {
         }
         db.strings.delete_where(|s| s.contains('h'));
         assert_eq!(1, db.strings.len());
-        Database::<Schema>::load_from_bytes(db.save_to_bytes()?)?;
+        Database::<Schema>::load_from_bytes(
+            repr::BinaryStable,
+            db.save_to_bytes(repr::BinaryStable)?,
+        )?;
         Ok(())
     }
 }
