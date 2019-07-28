@@ -4,6 +4,7 @@ rmp-serde = '0.13.7'
 serde = '1.0.90'
 serde_derive = '1.0.90'
 serde_yaml = '0.8.8'
+mashup = "*"
 
 [dependencies.hashbrown]
 features = ['serde']

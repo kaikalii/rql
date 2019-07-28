@@ -108,37 +108,37 @@ let mut db = Database::<MySchema>::new();
 
 // Insert values into the database
 // Insertion returns the new row's id
-let dan   = db.user.insert(User { name: "Dan".into(),   age: 25 });
-let steve = db.user.insert(User { name: "Steve".into(), age: 39 });
-let mary  = db.user.insert(User { name: "Mary".into(),  age: 31 });
+let dan   = db.user_mut().insert(User { name: "Dan".into(),   age: 25 });
+let steve = db.user_mut().insert(User { name: "Steve".into(), age: 39 });
+let mary  = db.user_mut().insert(User { name: "Mary".into(),  age: 31 });
 
-let admin  = db.group.insert(Group { name: "Admin".into()       });
-let normal = db.group.insert(Group { name: "Normal User".into() });
+let admin  = db.group_mut().insert(Group { name: "Admin".into()       });
+let normal = db.group_mut().insert(Group { name: "Normal User".into() });
 
-db.member.insert(Member { user_id: dan,   group_id: admin,  permission: true  });
-db.member.insert(Member { user_id: steve, group_id: normal, permission: true  });
-db.member.insert(Member { user_id: mary,  group_id: normal, permission: false });
+db.member_mut().insert(Member { user_id: dan,   group_id: admin,  permission: true  });
+db.member_mut().insert(Member { user_id: steve, group_id: normal, permission: true  });
+db.member_mut().insert(Member { user_id: mary,  group_id: normal, permission: false });
 
 // Data can easily be looked up by id
-db.user.get_mut(dan).unwrap().age += 1;
-let dan_age = db.user.get(dan).unwrap().age;
+db.user_mut().get_mut(dan).unwrap().age += 1;
+let dan_age = db.user().get(dan).unwrap().age;
 assert_eq!(dan_age, 26);
 
 // Data can be selected from a table
-let ages: Vec<u8> = db.user.select(|user| user.age).collect();
+let ages: Vec<u8> = db.user().select(|user| user.age).collect();
 
 // Use `wher` to filter entries
 let can_run_for_president: Vec<String> =
-    db.user
+    db.user()
         .wher(|user| user.age >= 35)
         .select(|user| user.name.clone())
         .collect();
 
 // Table intersections are done using `relate`
 // A function relating the tables is required
-for (user, permission) in db.user
+for (user, permission) in db.user()
     .relate(
-        &db.member,
+        &*db.member(),
         |user, member| user.id == member.user_id && member.group_id == normal
     )
     .select(|(user, member)| (&user.data.name, member.permission)) {
@@ -146,20 +146,20 @@ for (user, permission) in db.user
 }
 
 // Rows can be updated with `update`
-for mut user in db.user.update() {
+for mut user in db.user_mut().update() {
     user.age += 1;
 }
 
 // Rows can be deleted in a few ways
 
 // By id
-db.user.delete_one(steve);
+db.user_mut().delete_one(steve);
 
 // With a where clause
-db.member.delete_where(|member| member.permission);
+db.member_mut().delete_where(|member| member.permission);
 
 // With an iterator over ids
-db.user.delete_iter(|_| vec![dan, mary]);
+db.user_mut().delete_iter(|_| vec![dan, mary]);
 
 // The database can be saved
 // A representation must be specified
@@ -167,9 +167,9 @@ db.save(repr::HumanReadable, "database.yaml");
 
 // It can then be loaded again
 let db_copy: Database<MySchema> = Database::load(repr::HumanReadable, "database.yaml").unwrap();
-assert_eq!(db.user.len(),   db_copy.user.len()  );
-assert_eq!(db.group.len(),  db_copy.group.len() );
-assert_eq!(db.member.len(), db_copy.member.len());
+assert_eq!(db.user().len(),   db_copy.user().len()  );
+assert_eq!(db.group().len(),  db_copy.group().len() );
+assert_eq!(db.member().len(), db_copy.member().len());
 ```
 */
 
@@ -183,6 +183,7 @@ use std::{
     marker::PhantomData,
     ops::{Deref, DerefMut},
     path::Path,
+    sync::{RwLockReadGuard, RwLockWriteGuard},
 };
 
 use hashbrown::HashMap;
@@ -197,6 +198,8 @@ pub mod prelude {
     pub use crate::{repr, schema, Database, HasRows, HasRowsMut, Id, Row, RowMut, Table};
     pub use serde_derive::{Deserialize, Serialize};
 }
+
+pub use mashup;
 
 /// An error type for `rql`
 #[derive(Debug)]
@@ -453,6 +456,38 @@ pub trait HasRows: Sized {
     }
 }
 
+/**
+An immutable guard to a `Table`
+*/
+#[derive(Debug)]
+pub struct TableGuard<'a, T>(#[doc(hidden)] pub RwLockReadGuard<'a, Table<T>>);
+
+impl<'a, T> Deref for TableGuard<'a, T> {
+    type Target = Table<T>;
+    fn deref(&self) -> &Self::Target {
+        self.0.deref()
+    }
+}
+
+/**
+A mutable guard to a `Table`
+*/
+#[derive(Debug)]
+pub struct TableGuardMut<'a, T>(#[doc(hidden)] pub RwLockWriteGuard<'a, Table<T>>);
+
+impl<'a, T> Deref for TableGuardMut<'a, T> {
+    type Target = Table<T>;
+    fn deref(&self) -> &Self::Target {
+        self.0.deref()
+    }
+}
+
+impl<'a, T> DerefMut for TableGuardMut<'a, T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.0.deref_mut()
+    }
+}
+
 impl<I> HasRows for I
 where
     I: Iterator,
@@ -528,7 +563,7 @@ where
 }
 
 /**
-A relationship between two things
+A relationship between two table
 */
 pub struct Relate<A, B, F>
 where
@@ -727,42 +762,57 @@ struct Account {
     balance: f32,
 }
 
-// The schema type generated by
-
+// Define the schema
 schema! {
     SchemaA {
         person: Person,
         account: Account,
     }
 }
-
-// is structurally equivalent to
-
-struct SchemaB {
-    pub person: Table<Person>,
-    pub account: Table<Account>,
-}
 ```
 */
 #[macro_export]
 macro_rules! schema {
     ($name:ident { $($table:ident: $type:ty),* $(,)* }) => {
+        use std::sync::RwLock;
         #[derive(Default, rql::prelude::Serialize, rql::prelude::Deserialize)]
         #[serde(default)]
         struct $name {
-            $(pub $table: rql::Table<$type>),*
+            $($table: RwLock<rql::Table<$type>>),*
         }
-        schema!(impl $name);
+        schema!(impl $name { $($table: $type),* });
     };
     (pub $name:ident { $($table:ident: $type:ty),* $(,)* }) => {
+        use std::sync::RwLock;
         #[derive(Default, rql::prelude::Serialize, rql::prelude::Deserialize)]
         #[serde(default)]
         pub struct $name {
-            $(pub $table: rql::Table<$type>),*
+            $($table: RwLock<rql::Table<$type>>),*
         }
-        schema!(impl $name);
+        schema!(impl $name { $($table: $type),* });
     };
-    (impl $name:ident) => {}
+    (impl $name:ident { $($table:ident: $type:ty),* }) => {
+        use self::rql::{mashup::*, TableGuard, TableGuardMut};
+        mashup! {
+            $(
+                mut_name["mut_name" $table] = $table _mut;
+            )*
+        }
+        impl $name {
+            $(
+                /// Get an immutable guard to the table
+                pub fn $table(&self) -> TableGuard<$type> {
+                    TableGuard(self.$table.read().expect(concat!("Thread using ", stringify!($table), " table panicked")))
+                }
+                mut_name! {
+                    fn "mut_name" $table (&self) -> TableGuardMut<$type> {
+                        TableGuardMut(self.$table.write().expect(concat!("Thread using ", stringify!($table), " table panicked")))
+                    }
+                }
+            )*
+
+        }
+    }
 }
 
 /// Test module
@@ -782,25 +832,25 @@ mod tests {
                 strings: String,
             }
         }
-        let mut db: Database<Schema> = Database::new();
-        db.nums.insert(4);
-        db.nums.insert(2);
-        db.nums.insert(5);
-        db.strings.insert("hi".into());
-        db.strings.insert("hello".into());
-        db.strings.insert("world".into());
+        let db: Database<Schema> = Database::new();
+        db.nums_mut().insert(4);
+        db.nums_mut().insert(2);
+        db.nums_mut().insert(5);
+        db.strings_mut().insert("hi".into());
+        db.strings_mut().insert("hello".into());
+        db.strings_mut().insert("world".into());
         for s in db
-            .nums
-            .relate(&db.strings, |i, s| s.len() == **i)
+            .nums()
+            .relate(&*db.strings(), |i, s| s.len() == **i)
             .select(|(i, s)| format!("{}: {}", s, i))
         {
             println!("{:?}", s);
         }
-        for s in db.strings.relate(&db.nums, |s, n| s.len() == **n) {
+        for s in db.strings().relate(&*db.nums(), |s, n| s.len() == **n) {
             println!("{:?}", s);
         }
-        db.strings.delete_where(|s| s.contains('h'));
-        assert_eq!(1, db.strings.len());
+        db.strings_mut().delete_where(|s| s.contains('h'));
+        assert_eq!(1, db.strings().len());
         Database::<Schema>::load_from_bytes(
             repr::BinaryStable,
             db.save_to_bytes(repr::BinaryStable)?,
