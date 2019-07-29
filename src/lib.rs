@@ -175,6 +175,7 @@ assert_eq!(db.member().len(), db_copy.member().len());
 
 mod row;
 pub use row::*;
+pub mod example_schema;
 pub mod repr;
 
 use std::{
@@ -780,16 +781,16 @@ schema! {
 */
 #[macro_export]
 macro_rules! schema {
-    ($name:ident { $($table:ident: $type:ty),* $(,)* }) => {
-        #[derive(Default)]
+    ($(#[$struct_attr:meta])* $name:ident { $($table:ident: $type:ty),* $(,)* }) => {
+        $(#[$struct_attr])*
         struct $name {
             params: rql::SaveParams,
             $($table: std::sync::RwLock<rql::Table<$type>>),*
         }
         schema!(impl $name { $($table: $type),* });
     };
-    (pub $name:ident { $($table:ident: $type:ty),* $(,)* }) => {
-        #[derive(Default)]
+    ($(#[$struct_attr:meta])* pub $name:ident { $($table:ident: $type:ty),* $(,)* }) => {
+        $(#[$struct_attr])*
         pub struct $name {
             params: rql::SaveParams,
             $($table: std::sync::RwLock<rql::Table<$type>>),*
@@ -804,7 +805,8 @@ macro_rules! schema {
             )*
         }
         impl $name {
-            fn new<P: AsRef<std::path::Path>>(dir: P, repr: rql::Representation) -> rql::Result<Self> {
+            /// Create a new database with this schema or load it if it already exists
+            pub fn new<P: AsRef<std::path::Path>>(dir: P, repr: rql::Representation) -> rql::Result<Self> {
                 std::fs::create_dir_all(&dir)?;
                 let params = rql::SaveParams { path: dir.as_ref().to_path_buf(), repr };
                 Ok($name {
@@ -825,6 +827,7 @@ macro_rules! schema {
                     rql::TableGuard(self.$table.read().expect(concat!("Thread using ", stringify!($table), " table panicked")))
                 }
                 mut_name! {
+                    /// Get a mutable guard to the table
                     pub fn "mut_name" $table (&self) -> rql::TableGuardMut<$type> {
                         rql::TableGuardMut {
                             guard: self.$table.write().expect("Thread using table panicked"),
