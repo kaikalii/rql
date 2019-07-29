@@ -2,3 +2,4 @@
 **/*.rs.bk
 Cargo.lock
 database.yaml
+test_database*

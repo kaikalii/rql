@@ -103,8 +103,12 @@ Below are a few simple ways of interfacing with the database.
 #         member: Member,
 #     }
 # }
+
+# let _ = std::fs::remove_dir_all("test_database_example");
+
 // Create a new database with the previously defined schema
-let mut db = Database::<MySchema>::new();
+// We pass a folder name for the database files as well as a representation type
+let db = MySchema::new("test_database_example", HumanReadable).unwrap();
 
 // Insert values into the database
 // Insertion returns the new row's id
@@ -161,12 +165,8 @@ db.member_mut().delete_where(|member| member.permission);
 // With an iterator over ids
 db.user_mut().delete_iter(|_| vec![dan, mary]);
 
-// The database can be saved
-// A representation must be specified
-db.save(repr::HumanReadable, "database.yaml");
-
-// It can then be loaded again
-let db_copy: Database<MySchema> = Database::load(repr::HumanReadable, "database.yaml").unwrap();
+// Changes to the database are automatically saved, so they can be loaded again
+let db_copy = MySchema::new("test_database_example", HumanReadable).unwrap();
 assert_eq!(db.user().len(),   db_copy.user().len()  );
 assert_eq!(db.group().len(),  db_copy.group().len() );
 assert_eq!(db.member().len(), db_copy.member().len());
@@ -182,7 +182,7 @@ use std::{
     hash::{Hash, Hasher},
     marker::PhantomData,
     ops::{Deref, DerefMut},
-    path::Path,
+    path::{Path, PathBuf},
     sync::{RwLockReadGuard, RwLockWriteGuard},
 };
 
@@ -191,14 +191,15 @@ use serde::{de::DeserializeOwned, Serialize};
 use serde_derive::{Deserialize as Des, Serialize as Ser};
 use uuid::Uuid;
 
-use crate::repr::*;
+pub use crate::repr::*;
 
 /// A prelude for commonly used imports
 pub mod prelude {
-    pub use crate::{repr, schema, Database, HasRows, HasRowsMut, Id, Row, RowMut, Table};
+    pub use crate::{repr::*, schema, HasRows, HasRowsMut, Id, Row, RowMut, Table};
     pub use serde_derive::{Deserialize, Serialize};
 }
 
+#[doc(hidden)]
 pub use mashup;
 
 /// An error type for `rql`
@@ -207,7 +208,7 @@ pub enum Error {
     /// An io error
     Io(std::io::Error),
     /// A serialization/deserialization error
-    Serialization(Box<dyn std::error::Error>),
+    Serialization(String),
 }
 
 macro_rules! error_from {
@@ -409,6 +410,41 @@ where
     }
 }
 
+impl<T> Table<T>
+where
+    T: Serialize,
+{
+    /// Save the database to a file
+    pub fn save<P>(&self, path: P, repr: Representation) -> Result<()>
+    where
+        P: AsRef<Path>,
+    {
+        fs::write(path, self.save_to_bytes(repr)?)?;
+        Ok(())
+    }
+    /// Save the database to a byte vector
+    pub fn save_to_bytes(&self, repr: Representation) -> Result<Vec<u8>> {
+        repr.serialize(self).map_err(|e| Error::Serialization(e))
+    }
+}
+
+impl<T> Table<T>
+where
+    T: DeserializeOwned,
+{
+    /// Load a database from a file
+    pub fn load<P>(path: P, repr: Representation) -> Result<Self>
+    where
+        P: AsRef<Path>,
+    {
+        Table::load_from_bytes(fs::read(path)?, repr)
+    }
+    /// Load a database from a byte array
+    pub fn load_from_bytes<B: AsRef<[u8]>>(bytes: B, repr: Representation) -> Result<Self> {
+        repr.deserialize(bytes).map_err(|e| Error::Serialization(e))
+    }
+}
+
 /**
 A trait for accessing rows
 */
@@ -469,22 +505,81 @@ impl<'a, T> Deref for TableGuard<'a, T> {
     }
 }
 
+#[derive(Debug, Clone)]
+#[doc(hidden)]
+pub struct SaveParams {
+    pub path: PathBuf,
+    pub repr: Representation,
+}
+
+impl SaveParams {
+    #[doc(hidden)]
+    pub fn for_table_guard(&self, table: &str) -> Self {
+        SaveParams {
+            path: self.path.join(table).with_extension("yaml"),
+            repr: self.repr,
+        }
+    }
+}
+
+impl Default for SaveParams {
+    fn default() -> Self {
+        SaveParams {
+            path: PathBuf::from("database"),
+            repr: HumanReadable,
+        }
+    }
+}
+
 /**
 A mutable guard to a `Table`
 */
 #[derive(Debug)]
-pub struct TableGuardMut<'a, T>(#[doc(hidden)] pub RwLockWriteGuard<'a, Table<T>>);
+pub struct TableGuardMut<'a, T>
+where
+    T: Serialize,
+{
+    #[doc(hidden)]
+    pub guard: RwLockWriteGuard<'a, Table<T>>,
+    #[doc(hidden)]
+    pub params: SaveParams,
+}
 
-impl<'a, T> Deref for TableGuardMut<'a, T> {
-    type Target = Table<T>;
-    fn deref(&self) -> &Self::Target {
-        self.0.deref()
+impl<'a, T> TableGuardMut<'a, T>
+where
+    T: Serialize,
+{
+    /// Get the path of the table file
+    pub fn path(&self) -> PathBuf {
+        self.params.path.clone()
     }
 }
 
-impl<'a, T> DerefMut for TableGuardMut<'a, T> {
+impl<'a, T> Deref for TableGuardMut<'a, T>
+where
+    T: Serialize,
+{
+    type Target = Table<T>;
+    fn deref(&self) -> &Self::Target {
+        self.guard.deref()
+    }
+}
+
+impl<'a, T> DerefMut for TableGuardMut<'a, T>
+where
+    T: Serialize,
+{
     fn deref_mut(&mut self) -> &mut Self::Target {
-        self.0.deref_mut()
+        self.guard.deref_mut()
+    }
+}
+
+impl<'a, T> Drop for TableGuardMut<'a, T>
+where
+    T: Serialize,
+{
+    fn drop(&mut self) {
+        let _ = Table::<T>::save(&self.guard, &self.params.path, self.params.repr);
     }
 }
 
@@ -653,94 +748,6 @@ where
 }
 
 /**
-An in-memory pseudo database
-
-The type parameter `S` should be your schema type
-*/
-#[derive(Default, Ser, Des)]
-pub struct Database<S> {
-    tables: S,
-}
-
-impl<S> Database<S>
-where
-    S: Default,
-{
-    /// Create a new database
-    pub fn new() -> Self {
-        Database {
-            tables: Default::default(),
-        }
-    }
-    /// Get a reference to the `Database`'s tables
-    pub fn tables(&self) -> &S {
-        &self.tables
-    }
-    /// Get a mutable reference to the `Database`'s tables
-    pub fn tables_mut(&mut self) -> &mut S {
-        &mut self.tables
-    }
-}
-
-impl<S> Database<S>
-where
-    S: Serialize,
-{
-    /// Save the database to a file
-    pub fn save<R, P>(&self, repr: R, path: P) -> Result<()>
-    where
-        R: Representation + 'static,
-        P: AsRef<Path>,
-    {
-        fs::write(path, self.save_to_bytes(repr)?)?;
-        Ok(())
-    }
-    /// Save the database to a byte vector
-    pub fn save_to_bytes<R>(&self, _repr: R) -> Result<Vec<u8>>
-    where
-        R: Representation + 'static,
-    {
-        R::serialize(self).map_err(|e| Error::Serialization(Box::new(e)))
-    }
-}
-
-impl<S> Database<S>
-where
-    S: DeserializeOwned,
-{
-    /// Load a database from a file
-    pub fn load<R, P>(repr: R, path: P) -> Result<Self>
-    where
-        R: Representation + 'static,
-        P: AsRef<Path>,
-    {
-        Database::load_from_bytes(repr, fs::read(path)?)
-    }
-    /// Load a database from a byte array
-    pub fn load_from_bytes<R, B: AsRef<[u8]>>(_repr: R, bytes: B) -> Result<Self>
-    where
-        R: Representation + 'static,
-    {
-        R::deserialize(bytes)
-            .map_err(Box::new)
-            .map_err(|e| Error::Serialization(Box::new(e)))
-    }
-}
-
-impl<S> Deref for Database<S> {
-    type Target = S;
-    fn deref(&self) -> &Self::Target {
-        &self.tables
-    }
-}
-
-impl<S> DerefMut for Database<S> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.tables
-    }
-}
-
-/**
 Macro for generating a schema `struct`
 
 `schema!` generates the structure itself as well as necessary
@@ -774,39 +781,55 @@ schema! {
 #[macro_export]
 macro_rules! schema {
     ($name:ident { $($table:ident: $type:ty),* $(,)* }) => {
-        use std::sync::RwLock;
-        #[derive(Default, rql::prelude::Serialize, rql::prelude::Deserialize)]
-        #[serde(default)]
+        #[derive(Default)]
         struct $name {
-            $($table: RwLock<rql::Table<$type>>),*
+            params: rql::SaveParams,
+            $($table: std::sync::RwLock<rql::Table<$type>>),*
         }
         schema!(impl $name { $($table: $type),* });
     };
     (pub $name:ident { $($table:ident: $type:ty),* $(,)* }) => {
-        use std::sync::RwLock;
-        #[derive(Default, rql::prelude::Serialize, rql::prelude::Deserialize)]
-        #[serde(default)]
+        #[derive(Default)]
         pub struct $name {
-            $($table: RwLock<rql::Table<$type>>),*
+            params: rql::SaveParams,
+            $($table: std::sync::RwLock<rql::Table<$type>>),*
         }
         schema!(impl $name { $($table: $type),* });
     };
     (impl $name:ident { $($table:ident: $type:ty),* }) => {
-        use self::rql::{mashup::*, TableGuard, TableGuardMut};
+        use rql::mashup::*;
         mashup! {
             $(
                 mut_name["mut_name" $table] = $table _mut;
             )*
         }
         impl $name {
+            fn new<P: AsRef<std::path::Path>>(dir: P, repr: rql::Representation) -> rql::Result<Self> {
+                std::fs::create_dir_all(&dir)?;
+                let params = rql::SaveParams { path: dir.as_ref().to_path_buf(), repr };
+                Ok($name {
+                    $(
+                        $table: std::sync::RwLock::new(
+                            Table::<$type>::load(
+                                params.for_table_guard(stringify!($table)).path,
+                                repr
+                            ).unwrap_or_default()
+                        ),
+                    )*
+                    params,
+                })
+            }
             $(
                 /// Get an immutable guard to the table
-                pub fn $table(&self) -> TableGuard<$type> {
-                    TableGuard(self.$table.read().expect(concat!("Thread using ", stringify!($table), " table panicked")))
+                pub fn $table(&self) -> rql::TableGuard<$type> {
+                    rql::TableGuard(self.$table.read().expect(concat!("Thread using ", stringify!($table), " table panicked")))
                 }
                 mut_name! {
-                    fn "mut_name" $table (&self) -> TableGuardMut<$type> {
-                        TableGuardMut(self.$table.write().expect(concat!("Thread using ", stringify!($table), " table panicked")))
+                    pub fn "mut_name" $table (&self) -> rql::TableGuardMut<$type> {
+                        rql::TableGuardMut {
+                            guard: self.$table.write().expect("Thread using table panicked"),
+                            params: self.params.for_table_guard(stringify!($table)),
+                        }
                     }
                 }
             )*
@@ -826,13 +849,14 @@ mod tests {
     use super::*;
     #[test]
     fn compiles() -> Result<()> {
+        let _ = std::fs::remove_dir_all("test_database_compiles");
         schema! {
             Schema {
                 nums: usize,
                 strings: String,
             }
         }
-        let db: Database<Schema> = Database::new();
+        let db = Schema::new("test_database_compiles", HumanReadable)?;
         db.nums_mut().insert(4);
         db.nums_mut().insert(2);
         db.nums_mut().insert(5);
@@ -851,10 +875,6 @@ mod tests {
         }
         db.strings_mut().delete_where(|s| s.contains('h'));
         assert_eq!(1, db.strings().len());
-        Database::<Schema>::load_from_bytes(
-            repr::BinaryStable,
-            db.save_to_bytes(repr::BinaryStable)?,
-        )?;
         Ok(())
     }
 }
