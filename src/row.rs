@@ -1,9 +1,8 @@
 use std::{
+    collections::hash_map,
     fmt,
     ops::{Deref, DerefMut},
 };
-
-use hashbrown::hash_map;
 
 use crate::Id;
 

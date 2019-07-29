@@ -179,6 +179,7 @@ pub mod example_schema;
 pub mod repr;
 
 use std::{
+    collections::HashMap,
     fmt, fs,
     hash::{Hash, Hasher},
     marker::PhantomData,
@@ -187,7 +188,6 @@ use std::{
     sync::{RwLockReadGuard, RwLockWriteGuard},
 };
 
-use hashbrown::HashMap;
 use serde::{de::DeserializeOwned, Serialize};
 use serde_derive::{Deserialize as Des, Serialize as Ser};
 use uuid::Uuid;
