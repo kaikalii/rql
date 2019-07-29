@@ -41,7 +41,7 @@ mod rql {
     pub use crate::*;
 }
 
-use rql::prelude::*;
+use self::rql::prelude::*;
 
 /// An example user struct
 #[derive(Debug, Clone, Serialize, Deserialize)]
