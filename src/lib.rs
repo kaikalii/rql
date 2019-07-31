@@ -659,7 +659,7 @@ where
 }
 
 /**
-A relationship between two table
+A relationship between two tables
 */
 pub struct Relate<A, B, F>
 where
