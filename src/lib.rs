@@ -824,7 +824,10 @@ macro_rules! schema {
             $(
                 /// Get an immutable guard to the table
                 pub fn $table(&self) -> rql::TableGuard<$type> {
-                    rql::TableGuard(self.$table.read().expect(concat!("Thread using ", stringify!($table), " table panicked")))
+                    rql::TableGuard(
+                        self.$table.read()
+                            .expect(concat!("Thread using ", stringify!($table), " table panicked"))
+                    )
                 }
                 mut_name! {
                     /// Get a mutable guard to the table
@@ -836,6 +839,18 @@ macro_rules! schema {
                     }
                 }
             )*
+            /// Reload all tables
+            ///
+            /// Use this if some external source has modified a table file
+            pub fn reload(&self) {
+                $(
+                    *self.$table.write().expect("Thread using table panicked")
+                        = Table::<$type>::load(
+                            self.params.for_table_guard(stringify!($table)).path,
+                            self.params.repr
+                        ).unwrap_or_default();
+                )*
+            }
 
         }
     }
