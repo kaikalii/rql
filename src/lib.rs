@@ -196,7 +196,7 @@ pub use crate::repr::*;
 
 /// A prelude for commonly used imports
 pub mod prelude {
-    pub use crate::{repr::*, schema, HasRows, HasRowsMut, Id, Row, RowMut, Table};
+    pub use crate::{repr::*, schema, HasRows, HasRowsMut, Id, OwnedRow, Row, RowMut, Table};
     pub use serde_derive::{Deserialize, Serialize};
 }
 

@@ -14,6 +14,19 @@ pub struct Row<'a, T> {
     pub data: &'a T,
 }
 
+impl<'a, T> Row<'a, T>
+where
+    T: Clone,
+{
+    /// Clone the `Row`'s data into an `OwnedRow`
+    pub fn cloned(self) -> OwnedRow<T> {
+        OwnedRow {
+            id: self.id,
+            data: self.data.clone(),
+        }
+    }
+}
+
 impl<'a, T> Clone for Row<'a, T> {
     fn clone(&self) -> Self {
         Row {
@@ -88,6 +101,19 @@ pub struct RowMut<'a, T> {
     pub data: &'a mut T,
 }
 
+impl<'a, T> RowMut<'a, T>
+where
+    T: Clone,
+{
+    /// Clone the `RowMut`'s data into an `OwnedRow`
+    pub fn cloned(self) -> OwnedRow<T> {
+        OwnedRow {
+            id: self.id,
+            data: self.data.clone(),
+        }
+    }
+}
+
 impl<'a, T, U> PartialEq<RowMut<'a, U>> for RowMut<'a, T>
 where
     T: PartialEq<U>,
@@ -147,6 +173,90 @@ where
 }
 
 impl<'a, T> fmt::Display for RowMut<'a, T>
+where
+    T: fmt::Display,
+{
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        <T as fmt::Display>::fmt(&self.data, f)
+    }
+}
+
+/// An row of owned data cloned from a `Table`
+pub struct OwnedRow<T> {
+    /// The `OwnedRow`'s id
+    pub id: Id<T>,
+    /// The `OwnedRow`'s data
+    pub data: T,
+}
+
+impl<T, U> PartialEq<OwnedRow<U>> for OwnedRow<T>
+where
+    T: PartialEq<U>,
+{
+    fn eq(&self, other: &OwnedRow<U>) -> bool {
+        self.data.eq(&other.data)
+    }
+}
+
+impl<T> Eq for OwnedRow<T> where T: Eq {}
+
+impl<'a, T, U> PartialEq<Row<'a, U>> for OwnedRow<T>
+where
+    T: PartialEq<U>,
+{
+    fn eq(&self, other: &Row<U>) -> bool {
+        self.data.eq(other.data)
+    }
+}
+
+impl<'a, T, U> PartialEq<RowMut<'a, U>> for OwnedRow<T>
+where
+    T: PartialEq<U>,
+{
+    fn eq(&self, other: &RowMut<U>) -> bool {
+        self.data.eq(other.data)
+    }
+}
+
+impl<T> Deref for OwnedRow<T> {
+    type Target = T;
+    fn deref(&self) -> &Self::Target {
+        &self.data
+    }
+}
+
+impl<T> DerefMut for OwnedRow<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.data
+    }
+}
+
+impl<T> AsRef<T> for OwnedRow<T> {
+    fn as_ref(&self) -> &T {
+        &self.data
+    }
+}
+
+impl<T> AsMut<T> for OwnedRow<T> {
+    fn as_mut(&mut self) -> &mut T {
+        &mut self.data
+    }
+}
+
+impl<T> fmt::Debug for OwnedRow<T>
+where
+    T: fmt::Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        if f.alternate() {
+            write!(f, "{}: {:#?}", self.id, self.data)
+        } else {
+            write!(f, "{}: {:?}", self.id, self.data)
+        }
+    }
+}
+
+impl<T> fmt::Display for OwnedRow<T>
 where
     T: fmt::Display,
 {
