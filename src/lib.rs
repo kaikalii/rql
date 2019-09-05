@@ -179,6 +179,7 @@ pub mod example_schema;
 pub mod repr;
 
 use std::{
+    cmp::Ordering,
     collections::HashMap,
     fmt, fs,
     hash::{Hash, Hasher},
@@ -283,6 +284,18 @@ impl<T> PartialEq for Id<T> {
 }
 
 impl<T> Eq for Id<T> {}
+
+impl<T> PartialOrd for Id<T> {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        self.uuid.partial_cmp(&other.uuid)
+    }
+}
+
+impl<T> Ord for Id<T> {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.uuid.cmp(&other.uuid)
+    }
+}
 
 impl<T> Hash for Id<T> {
     fn hash<H: Hasher>(&self, state: &mut H) {
