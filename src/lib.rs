@@ -322,7 +322,7 @@ impl<T> Default for Id<T> {
 }
 
 impl<T> std::str::FromStr for Id<T> {
-    type Err = uuid::parser::ParseError;
+    type Err = uuid::Error;
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         s.parse::<Uuid>().map(|uuid| Id {
             uuid,
@@ -821,7 +821,7 @@ macro_rules! schema {
         schema!(impl $name { $($table: $type),* });
     };
     (impl $name:ident { $($table:ident: $type:ty),* }) => {
-        use rql::mashup::*;
+        use mashup::*;
         mashup! {
             $(
                 mut_name["mut_name" $table] = $table _mut;
