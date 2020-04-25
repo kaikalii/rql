@@ -10,6 +10,8 @@ serde_yaml = '0.8.11'
 features = [
     'v4',
     'serde',
+    'stdweb',
+    'wasm-bindgen',
 ]
 version = '0.8.1'
 
