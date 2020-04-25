@@ -821,7 +821,7 @@ macro_rules! schema {
         schema!(impl $name { $($table: $type),* });
     };
     (impl $name:ident { $($table:ident: $type:ty),* }) => {
-        use rql::mashup::*;
+        use mashup::*;
         mashup! {
             $(
                 mut_name["mut_name" $table] = $table _mut;
