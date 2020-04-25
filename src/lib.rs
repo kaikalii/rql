@@ -829,6 +829,7 @@ macro_rules! schema {
         }
         impl $name {
             /// Create a new database with this schema or load it if it already exists
+            #[allow(dead_code)]
             pub fn new<P: AsRef<std::path::Path>>(dir: P, repr: rql::Representation) -> rql::Result<Self> {
                 std::fs::create_dir_all(&dir)?;
                 let params = rql::SaveParams { path: dir.as_ref().to_path_buf(), repr };
@@ -846,6 +847,7 @@ macro_rules! schema {
             }
             $(
                 /// Get an immutable guard to the table
+                #[allow(dead_code)]
                 pub fn $table(&self) -> rql::TableGuard<$type> {
                     rql::TableGuard(
                         self.$table.read()
@@ -854,6 +856,7 @@ macro_rules! schema {
                 }
                 mut_name! {
                     /// Get a mutable guard to the table
+                    #[allow(dead_code)]
                     pub fn "mut_name" $table (&self) -> rql::TableGuardMut<$type> {
                         rql::TableGuardMut {
                             guard: self.$table.write().expect("Thread using table panicked"),
@@ -865,6 +868,7 @@ macro_rules! schema {
             /// Reload all tables
             ///
             /// Use this if some external source has modified a table file
+            #[allow(dead_code)]
             pub fn reload(&self) {
                 $(
                     *self.$table.write().expect("Thread using table panicked")
