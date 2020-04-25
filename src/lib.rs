@@ -322,7 +322,7 @@ impl<T> Default for Id<T> {
 }
 
 impl<T> std::str::FromStr for Id<T> {
-    type Err = uuid::parser::ParseError;
+    type Err = uuid::Error;
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         s.parse::<Uuid>().map(|uuid| Id {
             uuid,

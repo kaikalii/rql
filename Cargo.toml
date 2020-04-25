@@ -11,7 +11,7 @@ features = [
     'v4',
     'serde',
 ]
-version = '0.7.4'
+version = '0.8.1'
 
 [package]
 authors = ['Kai Schmidt <kaikaliischmidt@gmail.com>']
