@@ -7,33 +7,18 @@ serde_derive = '1.0.106'
 serde_yaml = '0.8.11'
 
 [dependencies.uuid]
-features = [
-    'v4',
-    'serde',
-    'stdweb',
-    'wasm-bindgen',
-]
+features = ['v4', 'serde', 'stdweb', 'wasm-bindgen']
 version = '0.8.1'
 
 [package]
 authors = ['Kai Schmidt <kaikaliischmidt@gmail.com>']
-categories = [
-    'database',
-    'database-implementations',
-    'data-structures',
-]
+categories = ['database', 'database-implementations', 'data-structures']
 description = 'An in-memory pseudo database that provides functionality for managing pseudo-relational tables and their schema'
 documentation = 'https://docs.rs/rql'
 edition = '2018'
-keywords = [
-    'sql',
-    'orm',
-    'in-memory',
-    'table',
-    'schema',
-]
+keywords = ['sql', 'orm', 'in-memory', 'table', 'schema']
 license = 'MIT'
 name = 'rql'
 readme = 'readme.md'
 repository = 'https://github.com/kaikalii/rql'
-version = '0.5.1'
+version = '0.5.2'
