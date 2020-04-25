@@ -1,10 +1,10 @@
 [dependencies]
 bincode = '1.1.4'
 mashup = '0.1.9'
-rmp-serde = '0.13.7'
-serde = '1.0.98'
-serde_derive = '1.0.98'
-serde_yaml = '0.8.9'
+rmp-serde = '0.14.3'
+serde = '1.0.106'
+serde_derive = '1.0.106'
+serde_yaml = '0.8.11'
 
 [dependencies.uuid]
 features = [
